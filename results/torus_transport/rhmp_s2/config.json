@@ -1,0 +1,354 @@
+{
+ "args": {
+  "task": "T2a",
+  "native": true,
+  "root": null,
+  "out": "runs/proj/T2a/proj_s2",
+  "device": null,
+  "epochs": 100,
+  "seed": 2,
+  "model": "rhmp",
+  "param_budget": null,
+  "model_opts": null,
+  "C": null,
+  "layers": "project,poly,resolvent,poly",
+  "metric_type": "tensor",
+  "resolvent_iters": 12,
+  "resolvent_grad": null,
+  "resolvent_physical": false,
+  "latent": null,
+  "metric_ref": "1:3",
+  "material": "1:2,2:2",
+  "solver_mode": false,
+  "solve_iters": null,
+  "solve_tol": null,
+  "solve_precond": null,
+  "solve_bc": null,
+  "solve_picard": null,
+  "picard_relax": null,
+  "picard_init": null,
+  "no_metric_geo": false,
+  "tensor_param": "full",
+  "aux_pde": 0.0,
+  "no_learn_metric": false,
+  "transport": "{\"inputs\":[0],\"order\":2,\"metric\":\"star\"}",
+  "poly": 2,
+  "log_range": 5.0,
+  "metric_hidden": 32,
+  "scaling": "dec",
+  "tie": true,
+  "no_cross": false,
+  "gate": "norm",
+  "term_gates": false,
+  "cochain_head": null,
+  "lift_context": null,
+  "lift_vertex": false,
+  "readout_depth": null,
+  "readout_spatial": false,
+  "readout_skip": false,
+  "frozen_units": false,
+  "frozen_descriptors": null,
+  "no_frozen_descriptors": false,
+  "readout_wedge": null,
+  "readout_layers": null,
+  "amplitude": null,
+  "amplitude_power": null,
+  "amplitude_energy": false,
+  "readout_energy": null,
+  "readout_energy_clip": null,
+  "no_kutta": false,
+  "kutta_range": null,
+  "kutta_corner": null,
+  "project_solver": "dense",
+  "readout_hidden": null,
+  "lifting": null,
+  "readout_head": null,
+  "fit_readout": false,
+  "identity_metric": false,
+  "star": "cotan",
+  "vector_mode": null,
+  "connection_odd": null,
+  "no_connection": false,
+  "no_output_map": false,
+  "batch": null,
+  "bs_meshes": null,
+  "eval_batch": null,
+  "lr": 0.001,
+  "wd": 1e-05,
+  "eta_min": 1e-05,
+  "clip": 1.0,
+  "amp": false,
+  "compile": false,
+  "compile_backend": "inductor",
+  "ckpt_layers": false,
+  "no_tf32": false,
+  "max_samples": null,
+  "max_train_batches": null,
+  "no_fine": false,
+  "abs_scale": false,
+  "data_on": "auto",
+  "no_resume": false,
+  "force": false,
+  "check_data": false,
+  "eval_v1": null,
+  "eval_ckpt": null,
+  "v1_eval_batch": 1,
+  "quiet": false,
+  "stop_after": null
+ },
+ "model": {
+  "in_dims": {
+   "0": 1,
+   "1": 4,
+   "2": 2
+  },
+  "even_dims": {
+   "1": 3,
+   "2": 2
+  },
+  "connection_dims": {},
+  "C": 64,
+  "n_layers": 4,
+  "poly_order": 2,
+  "metric_hidden": 32,
+  "log_range": 5.0,
+  "tie_metrics": true,
+  "scaling": "dec",
+  "cross": true,
+  "gate": "norm",
+  "identity_metric": false,
+  "readout": "node_scalar",
+  "out_dim": 1,
+  "vector_mode": "ls",
+  "checkpoint_layers": false,
+  "amp": false,
+  "connection_odd": false,
+  "lift_hidden": 64,
+  "fused": true,
+  "layers": [
+   "project",
+   "poly",
+   "resolvent",
+   "poly"
+  ],
+  "resolvent_iters": 12,
+  "resolvent_grad": "implicit",
+  "metric_type": "tensor",
+  "metric_reference": {
+   "1": 3
+  },
+  "resolvent_warm_start": true,
+  "learn_metric": true,
+  "latent_dims": {},
+  "material_dims": {
+   "1": 2,
+   "2": 2
+  },
+  "lifting": "mlp",
+  "resolvent_normalize": true,
+  "solve_iters": 64,
+  "solve_tol": 1e-06,
+  "solve_bc": "dirichlet",
+  "tensor_param": "full",
+  "solve_precond": "none",
+  "readout_head": "mlp",
+  "term_gates": false,
+  "cochain_head": "linear",
+  "readout_hidden": 16,
+  "amplitude_dims": {},
+  "lift_context": 0,
+  "lift_vertex": false,
+  "readout_layers": "last",
+  "readout_depth": 1,
+  "readout_skip": false,
+  "readout_spatial": false,
+  "readout_wedge": 0,
+  "frozen_units": false,
+  "frozen_descriptors": true,
+  "amplitude_power": 1,
+  "amplitude_energy": false,
+  "readout_energy": 0,
+  "readout_energy_clip": 0.0,
+  "project_harmonic": true,
+  "kutta_range": 8.0,
+  "project_solver": "dense",
+  "kutta_corner": 0.0,
+  "transport": {
+   "inputs": [
+    0
+   ],
+   "latent": 0,
+   "hidden": 0,
+   "forms": [
+    "cons",
+    "adv",
+    "upwind"
+   ],
+   "order": 2,
+   "norm": "metric",
+   "metric": "star"
+  },
+  "solve_picard": 0,
+  "picard_relax": 0.5,
+  "metric_geo": true,
+  "picard_init": "zero"
+ },
+ "params": 35526,
+ "data": {
+  "name": "T2a",
+  "native": true,
+  "N": 3000,
+  "cells": {
+   "0": 1711,
+   "1": 5133,
+   "2": 3422
+  },
+  "inputs": {
+   "0": [
+    3000,
+    1711,
+    1
+   ],
+   "1": [
+    3000,
+    5133,
+    4
+   ],
+   "2": [
+    3000,
+    3422,
+    2
+   ]
+  },
+  "target": [
+   3000,
+   1711,
+   1
+  ],
+  "target_degree": 0,
+  "target_kind": "node_scalar",
+  "readout": "node_scalar",
+  "target_readout": "node_scalar",
+  "output_map": null,
+  "in_dims": {
+   "0": 1,
+   "1": 4,
+   "2": 2
+  },
+  "even_dims": {
+   "1": 3,
+   "2": 2
+  },
+  "connection_dims": {},
+  "split": [
+   2100,
+   450,
+   450
+  ],
+  "spatial_dim": 3,
+  "x_stats": {
+   "0": {
+    "mean": [
+     -1.4863421257671483e-11
+    ],
+    "std": [
+     0.28388357162475586
+    ],
+    "kind": "v1"
+   },
+   "1": {
+    "mean": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "std": [
+     0.05891533941030502,
+     0.002039054874330759,
+     1.0,
+     1.0
+    ],
+    "kind": "scale"
+   },
+   "2": {
+    "mean": [
+     0.0,
+     0.0
+    ],
+    "std": [
+     1.0,
+     1.0
+    ],
+    "kind": "v1"
+   }
+  },
+  "y_stats": {
+   "mean": [
+    -0.00022645463468506932
+   ],
+   "std": [
+    0.2601902484893799
+   ],
+   "kind": "v1"
+  },
+  "extra_tests": [],
+  "meta": {
+   "v1_C": 64,
+   "batch_size": 64,
+   "layers": 4,
+   "generator": {
+    "T": 0.2,
+    "n_sub": 200,
+    "checks": {
+     "flux": {
+      "div_max_rel": 6.177137948708224e-15,
+      "quadrature_rel_l2": 0.00412089502317918
+     },
+     "isotropic_limit_rel": 3.8753902950763657e-16,
+     "time_convergence": {
+      "25->50": 0.0006039592628642194,
+      "50->100": 0.00015140626098017379,
+      "100->200": 3.7877693776429294e-05,
+      "200->400": 9.471058057686915e-06,
+      "400->800": 2.3678667012376254e-06
+     },
+     "time_error_vs_800_at_N_SUB": 1.1838925197279284e-05,
+     "mesh_convergence_base_vs_fine": {
+      "rel_l2_mean": 0.028874905901375862,
+      "rel_l2_max": 0.06900281974391356,
+      "coincident_vertex_dist_max": 2.5463115409962923e-07
+     }
+    },
+    "mass_drift_max": 9.98769001214598e-15,
+    "target_stats": {
+     "amplitude_ratio_l2_mean": 0.9070291663421209,
+     "rel_change_l2_mean": 0.6389800586416114
+    }
+   },
+   "parameters": {
+    "alpha": "<tensor (3000,)>",
+    "beta": "<tensor (3000,)>",
+    "ratio": "<tensor (3000,)>",
+    "D0": "<tensor (3000,)>",
+    "eps": "<tensor (3000,)>",
+    "chi0": "<tensor (3000,)>"
+   },
+   "metric_ref": "1:3",
+   "material": "1:2,2:2",
+   "native_inputs": "node f; edge velocity 1-form (odd), half-difference, cos^2(t_e, b), log t_e^T D t_e (even); face log D_par, log D_perp (even)"
+  }
+ },
+ "load_seconds": 1.8292360305786133,
+ "metric_reference_raw": true,
+ "raw_input_columns": {
+  "1": [
+   2,
+   3
+  ],
+  "2": [
+   0,
+   1
+  ]
+ }
+}

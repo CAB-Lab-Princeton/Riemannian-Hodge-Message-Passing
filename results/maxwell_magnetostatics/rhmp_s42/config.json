@@ -1,0 +1,381 @@
+{
+ "args": {
+  "task": "MXA",
+  "native": true,
+  "root": null,
+  "out": "runs/maxwell/MXA/solver_T_J4_nogeo_s42",
+  "device": null,
+  "epochs": 100,
+  "seed": 42,
+  "model": "rhmp",
+  "param_budget": null,
+  "model_opts": null,
+  "C": 4,
+  "layers": "solve",
+  "metric_type": "tensor",
+  "resolvent_iters": null,
+  "resolvent_grad": null,
+  "latent": null,
+  "metric_ref": null,
+  "material": "1:7,2:5",
+  "solver_mode": true,
+  "solve_iters": 128,
+  "solve_tol": 1e-05,
+  "solve_precond": "twolevel",
+  "solve_bc": null,
+  "solve_picard": 4,
+  "picard_relax": null,
+  "picard_init": null,
+  "no_metric_geo": true,
+  "tensor_param": null,
+  "aux_pde": 0.0,
+  "no_learn_metric": false,
+  "poly": 2,
+  "log_range": 5.0,
+  "metric_hidden": 32,
+  "scaling": "dec",
+  "tie": true,
+  "no_cross": false,
+  "gate": "norm",
+  "identity_metric": false,
+  "star": "cotan",
+  "vector_mode": null,
+  "connection_odd": null,
+  "no_connection": false,
+  "no_output_map": false,
+  "batch": null,
+  "bs_meshes": null,
+  "eval_batch": 16,
+  "lr": 0.001,
+  "wd": 1e-05,
+  "eta_min": 1e-05,
+  "clip": 1.0,
+  "amp": false,
+  "compile": false,
+  "compile_backend": "inductor",
+  "ckpt_layers": false,
+  "no_tf32": false,
+  "max_samples": null,
+  "max_train_batches": null,
+  "no_fine": false,
+  "abs_scale": false,
+  "data_on": "auto",
+  "no_resume": false,
+  "force": false,
+  "check_data": false,
+  "eval_v1": null,
+  "eval_ckpt": null,
+  "v1_eval_batch": 1,
+  "quiet": false,
+  "stop_after": null,
+  "_resume_tensor_param": "full"
+ },
+ "model": {
+  "in_dims": {
+   "0": 1,
+   "1": 7,
+   "2": 5
+  },
+  "even_dims": {
+   "1": 7,
+   "2": 5
+  },
+  "connection_dims": {},
+  "C": 4,
+  "n_layers": 1,
+  "poly_order": 2,
+  "metric_hidden": 32,
+  "log_range": 5.0,
+  "tie_metrics": true,
+  "scaling": "dec",
+  "cross": false,
+  "gate": "none",
+  "identity_metric": false,
+  "readout": "grad",
+  "out_dim": 1,
+  "vector_mode": "ls",
+  "checkpoint_layers": false,
+  "amp": false,
+  "connection_odd": false,
+  "lift_hidden": 64,
+  "fused": true,
+  "layers": [
+   "solve"
+  ],
+  "resolvent_iters": 20,
+  "resolvent_grad": "implicit",
+  "metric_type": "tensor",
+  "metric_reference": {},
+  "resolvent_warm_start": true,
+  "learn_metric": true,
+  "latent_dims": {},
+  "material_dims": {
+   "1": 7,
+   "2": 5
+  },
+  "lifting": "linear",
+  "resolvent_normalize": true,
+  "solve_iters": 128,
+  "solve_tol": 1e-05,
+  "solve_bc": "dirichlet",
+  "tensor_param": "full",
+  "solve_precond": "twolevel",
+  "readout_head": "linear",
+  "solve_picard": 4,
+  "picard_relax": 0.5,
+  "metric_geo": false,
+  "picard_init": "zero"
+ },
+ "params": 2229,
+ "data": {
+  "name": "MXA",
+  "native": true,
+  "N": 5000,
+  "cells": {
+   "0": 1818,
+   "1": 5403,
+   "2": 3586
+  },
+  "inputs": {
+   "0": [
+    5000,
+    1818,
+    1
+   ],
+   "1": [
+    5000,
+    5403,
+    7
+   ],
+   "2": [
+    5000,
+    3586,
+    5
+   ]
+  },
+  "target": [
+   5000,
+   1818,
+   2
+  ],
+  "target_degree": 0,
+  "target_kind": "node_vector",
+  "readout": "grad",
+  "target_readout": "node_vector",
+  "output_map": "edge fluxes d0 A -> vertex B = R(-90 deg) of the area-weighted mean element gradient (P1), unit length 100 mm",
+  "in_dims": {
+   "0": 1,
+   "1": 7,
+   "2": 5
+  },
+  "even_dims": {
+   "1": 7,
+   "2": 5
+  },
+  "connection_dims": {},
+  "split": [
+   3500,
+   750,
+   750
+  ],
+  "spatial_dim": 2,
+  "x_stats": {
+   "0": {
+    "mean": [
+     0.0
+    ],
+    "std": [
+     1.3591402769088745
+    ],
+    "kind": "solver"
+   },
+   "1": {
+    "mean": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "std": [
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "kind": "solver"
+   },
+   "2": {
+    "mean": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "std": [
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "kind": "solver"
+   }
+  },
+  "y_stats": {
+   "mean": [
+    0.0,
+    0.0
+   ],
+   "std": [
+    0.3086245059967041,
+    0.3086245059967041
+   ],
+   "kind": "solver"
+  },
+  "extra_tests": [
+   "ood15",
+   "ood15_test100",
+   "fine",
+   "fine_test100",
+   "coarse",
+   "coarse_test100",
+   "heldout",
+   "heldout_test100"
+  ],
+  "meta": {
+   "v1_C": 128,
+   "batch_size": 64,
+   "layers": 4,
+   "source": "datasets/v2/MXA.pt",
+   "generator": "datasets/generators/gen_maxwell_aniso.py",
+   "law": "W(B) = w_e(|B|) cos^2 theta + w_h(|B|) sin^2 theta (Froehlich-Kennelly energies, theta = angle between B and the rolling direction)",
+   "materials": {
+    "NO": {
+     "mu_easy": 3000.0,
+     "mu_hard": 3000.0,
+     "Hk_easy": 530.6933747645726,
+     "Hk_hard": 530.6933747645726
+    },
+    "GO": {
+     "mu_easy": 20000.0,
+     "mu_hard": 800.0,
+     "Hk_easy": 79.5814506184786,
+     "Hk_hard": 1991.9266970199667
+    },
+    "LAM": {
+     "mu_easy": 2500.0,
+     "mu_hard": 500.0,
+     "Hk_easy": 636.8745221764519,
+     "Hk_hard": 3189.477817472852
+    }
+   },
+   "Js": 2.0,
+   "phase_columns": [
+    "air",
+    "copper",
+    "NO",
+    "GO",
+    "LAM"
+   ],
+   "mesh_stats": {
+    "scale": 1.0,
+    "seed": 31,
+    "spacing_mm": 8.0,
+    "n0": 1818,
+    "n1": 5403,
+    "n2": 3586,
+    "euler": 1,
+    "n_lattice": 1522,
+    "n_far": 248,
+    "n_box": 48,
+    "n_lattice_faces": 2890,
+    "n_equilateral": 2822,
+    "unused": 0,
+    "nonmanifold": 0,
+    "min_angle": 10.17076141113061,
+    "min_angle_p1": 21.20600006654258,
+    "max_angle": 135.95046533528972,
+    "frac_obtuse": 0.06776352481873954,
+    "lattice_rect": [
+     -168.0,
+     168.0,
+     -118.0,
+     117.55890982936731
+    ]
+   },
+   "families": [
+    "EI",
+    "UI",
+    "ST",
+    "EE"
+   ],
+   "family_counts": {
+    "EI": 2047,
+    "UI": 1434,
+    "ST": 1519,
+    "EE": 0
+   },
+   "split_note": "sequential 70/15/15 of 5000: train 0..3499, validation 3500..4249, test 4250..4999",
+   "edge_columns": [
+    "f_air",
+    "f_copper",
+    "f_NO",
+    "f_GO",
+    "f_LAM",
+    "cos2_edge_rolling_GO",
+    "cos2_edge_rolling_LAM"
+   ],
+   "orientation": true,
+   "legacy_columns": [
+    "J",
+    "f_air",
+    "f_copper",
+    "f_NO",
+    "f_GO",
+    "f_LAM",
+    "GO_cos2phi",
+    "GO_sin2phi",
+    "LAM_cos2phi",
+    "LAM_sin2phi"
+   ],
+   "frame_pairs": [],
+   "native_inputs": "vertex J (lumped); edge phase fractions + cos^2(edge, rolling direction) of the incident GO / LAM faces; face phase one-hot (even columns)",
+   "consistency": {
+    "max_rel_err_map_of_d0A_vs_target": 1.0583474363556888e-07,
+    "samples": 16
+   },
+   "ood15_mesh": 1818,
+   "fine_mesh": 7255,
+   "coarse_mesh": 459,
+   "heldout_mesh": 1818,
+   "load_seconds": 7.524518251419067
+  }
+ },
+ "load_seconds": 7.8351757526397705,
+ "metric_reference_raw": true,
+ "raw_input_columns": {
+  "1": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6
+  ],
+  "2": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ]
+ }
+}

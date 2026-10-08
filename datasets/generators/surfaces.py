@@ -82,7 +82,7 @@ def adjacency(faces: np.ndarray, n: int) -> sp.csr_matrix:
 
 
 def merge_close_vertices(pts: np.ndarray, faces: np.ndarray, tol: float = MERGE_TOL):
-    """Merge vertices closer than ``tol`` (seams of patch-wise parametrisations) and drop unused vertices.
+    """Fuse vertices closer than ``tol`` (seams of patch-wise parametrisations) and drop unused vertices.
 
     Returns:
         ``(pts', faces')`` with faces re-indexed (vertex order = order of first occurrence of each cluster).
@@ -273,7 +273,7 @@ def cube_sphere(n: int, rng: np.random.Generator | None = None):
     faces = split_quads(np.concatenate(quads, 0), rng)
     pts, faces = merge_close_vertices(pts, faces)
     if len(pts) != 6 * n * n + 2:
-        raise RuntimeError(f"cube-sphere seam merge failed: {len(pts)} != {6 * n * n + 2}")
+        raise RuntimeError(f"cube-sphere seam fusion failed: {len(pts)} != {6 * n * n + 2}")
     return pts, orient_faces_outward_convex(pts, faces, np.zeros(3))
 
 

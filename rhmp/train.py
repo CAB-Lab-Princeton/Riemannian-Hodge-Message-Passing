@@ -42,7 +42,7 @@ from rhmp import metrics as M
 from rhmp.data import TaskData, iterate_indices, mesh_minibatch, same_device, shared_minibatch
 
 __all__ = ["parse_args", "run", "build_config", "model_output", "batch_loss", "pde_residual", "predict", "evaluate",
-           "main"]
+           "needs_whitney", "main"]
 
 
 # ================================================================================================================
@@ -72,11 +72,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="JSON dict of builder options for --model, e.g. '{\"n_layers\": 8}' or '{\"hidden\": 64}'")
     p.add_argument("--C", type=int, default=None, help="hidden channels (default: v1 C of the task)")
     p.add_argument("--layers", type=str, default=None,
-                   help="depth (e.g. 4; default: task default) or per-layer types, e.g. poly,poly,resolvent,poly")
+                   help="depth (e.g. 4; default: task default) or per-layer types (poly | resolvent | solve | "
+                        "project), e.g. poly,poly,resolvent,poly or project,poly,poly,poly")
     p.add_argument("--metric-type", default="diag", choices=["diag", "tensor"],
                    help="diagonal metrics (default) or the Whitney/Galerkin material-tensor metric (DESIGN 9.1)")
     p.add_argument("--resolvent-iters", type=int, default=None, help="CG iterations of resolvent layers")
     p.add_argument("--resolvent-grad", default=None, choices=["implicit", "unrolled"])
+    p.add_argument("--resolvent-physical", action="store_true",
+                   help="resolvent layers use the un-normalised physical operator (I + tau L^2 Delta_H)^-1 "
+                        "(RHMPConfig.resolvent_normalize=False; needed for tensor metrics in resolvent layers)")
     p.add_argument("--latent", default=None, metavar="K:R[,K:R]",
                    help="r learnable per-cell input columns on degree k (RHMPConfig.latent_dims), e.g. 1:8; tied to one "
                         "mesh: shared-mesh tasks only")
@@ -92,12 +96,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         "free cells, physical units), no gates, no cross terms, linear readout (node_scalar -> "
                         "cochain:0), C = --C or 4: the metric is the only nonlinearity (--layers may list other types)")
     p.add_argument("--solve-iters", type=int, default=None, help="CG iterations of solve layers (default 64)")
+    p.add_argument("--solve-tol", type=float, default=None,
+                   help="relative CG residual at which solve layers stop early (default 1e-6)")
     p.add_argument("--solve-precond", default=None, choices=["none", "twolevel"],
                    help="CG preconditioner of solve layers (default none = Jacobi; twolevel = Jacobi + coarse "
                         "correction on spatial aggregates, vertex solves)")
-    p.add_argument("--solve-bc", default=None, choices=["dirichlet", "none", "neumann"],
-                   help="solve layers: fixed boundary cells (K.boundary / K.meta['dirichlet']), none, or neumann (no "
-                        "fixed cells, zero-mean vertex solution of the pure Neumann problem, e.g. T5/T5g)")
+    p.add_argument("--solve-bc", default=None, choices=["dirichlet", "none", "neumann", "lift"],
+                   help="solve layers: fixed boundary cells (K.boundary / K.meta['dirichlet']), none, neumann (no "
+                        "fixed cells, zero-mean vertex solution of the pure Neumann problem, e.g. T5/T5g), or lift "
+                        "(fixed cells keep the layer input: inhomogeneous Dirichlet data, e.g. electrode potentials)")
+    p.add_argument("--solve-picard", type=int, default=None, metavar="J",
+                   help="fixed-point (Picard) iterations of the vertex solve of solve layers with a state-dependent "
+                        "metric (field-energy invariant of the previous iterate; RHMPConfig.solve_picard; default 0)")
+    p.add_argument("--picard-relax", type=float, default=None, metavar="W",
+                   help="initial relaxation omega in (0, 1) of the Picard iteration (learnable; default 0.5)")
+    p.add_argument("--picard-init", default=None, choices=["zero", "learned"],
+                   help="state of the first Picard iteration: zero field (default) or a learnable uniform energy "
+                        "invariant (RHMPConfig.picard_init)")
+    p.add_argument("--no-metric-geo", action="store_true",
+                   help="metric heads without geometric descriptors (material, feature and Picard invariants only; "
+                        "RHMPConfig.metric_geo=False)")
     p.add_argument("--tensor-param", default=None, choices=["full", "cone"],
                    help="tensor metrics: full SPD tensors b expm(sum s t t^T) (default) or the edge cone "
                         "b I + sum a t t^T with a >= 0 (the parameterisation of runs saved without this option)")
@@ -108,6 +126,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--no-learn-metric", action="store_true",
                    help="freeze the metric at the reference (H = star exp(ref); RHMPConfig.learn_metric=False): the pure "
                         "DEC/FEEC physics prior without metric heads")
+    p.add_argument("--transport", default=None, metavar="JSON",
+                   help="transport term of the vertices (RHMPConfig.transport, rhmp.transport), e.g. "
+                        "'{\"inputs\": [0], \"order\": 2}' (input column 0 of degree 1 as the transport field), "
+                        "'{\"latent\": 2, \"hidden\": 1}'; keys inputs, latent, hidden, forms, order, norm, "
+                        "metric")
     p.add_argument("--poly", type=int, default=2)
     p.add_argument("--log-range", type=float, default=2.0)
     p.add_argument("--metric-hidden", type=int, default=32)
@@ -116,7 +139,76 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     g.add_argument("--tie", dest="tie", action="store_true", default=True)
     g.add_argument("--untie", dest="tie", action="store_false")
     p.add_argument("--no-cross", action="store_true")
-    p.add_argument("--gate", default="norm", choices=["norm", "relu", "none"])
+    p.add_argument("--gate", default="norm", choices=["norm", "relu", "none", "homog"],
+                   help="update gate: norm (bounded radial gate, default), homog (homogeneous of degree one in the "
+                        "field amplitude), relu (ablation), none (linear)")
+    p.add_argument("--term-gates", action="store_true",
+                   help="per-term gates in polynomial layers (every power L^p x and cross term gets a per-cell factor "
+                        "from scale-invariant invariants; RHMPConfig.term_gates)")
+    p.add_argument("--cochain-head", default=None, choices=["linear", "gated", "context"],
+                   help="head of cochain:k readouts: linear (default), gated (odd linear map x even gate) or context "
+                        "(gated, with the lower-degree features of the cell)")
+    p.add_argument("--lift-context", type=int, default=None, metavar="P",
+                   help="lifting gates of degrees >= 1 also see the vertex mean of a P-dim projection of the lifted "
+                        "vertex features (RHMPConfig.lift_context; default 0)")
+    p.add_argument("--lift-vertex", action="store_true",
+                   help="the vertex lifting also sees the codifferential of the odd edge inputs and vertex means of "
+                        "edge-input invariants (RHMPConfig.lift_vertex)")
+    p.add_argument("--readout-depth", type=int, default=None,
+                   help="odd gated stages of the gated / context cochain heads (default 1)")
+    p.add_argument("--readout-spatial", action="store_true",
+                   help="later stages of a deep cochain head (--readout-depth >= 2) also mix neighbouring cells "
+                        "through the combinatorial Hodge Laplacian (RHMPConfig.readout_spatial)")
+    p.add_argument("--readout-skip", action="store_true",
+                   help="gated / context cochain heads also read the odd inputs of their degree and the coboundary of "
+                        "the odd inputs one degree below (linear input skip; RHMPConfig.readout_skip)")
+    p.add_argument("--frozen-units", action="store_true",
+                   help="per-mesh geometric normalisers (star means, descriptor medians, block bounds) of the training "
+                        "mesh, stored in the model and used on every mesh (RHMPConfig.frozen_units)")
+    p.add_argument("--frozen-descriptors", default=None, choices=["train", "mesh", "auto"],
+                   help="with --frozen-units: relative descriptors in training-mesh units ('train', the default), "
+                        "relative to each mesh ('mesh': only star means and block bounds frozen) or per column 'auto' "
+                        "(training units while the mesh's median lies in the training range; "
+                        "RHMPConfig.frozen_descriptors True / False / 'auto')")
+    p.add_argument("--no-frozen-descriptors", action="store_true", help="same as --frozen-descriptors mesh")
+    p.add_argument("--readout-wedge", type=int, default=None, metavar="H",
+                   help="gated / context head of a cochain:2 readout also reads H face wedge products of projections "
+                        "of the final edge features (RHMPConfig.readout_wedge; default 0)")
+    p.add_argument("--readout-layers", default=None, choices=["last", "all"],
+                   help="cochain readouts read the features after the lifting and after every layer (all) or after the "
+                        "last layer only (last, default)")
+    p.add_argument("--amplitude", default=None, metavar="K:N[,K:N]",
+                   help="the first N input columns of degree K scale with one field amplitude: they are divided by "
+                        "their per-sample RMS and the output is multiplied by it (RHMPConfig.amplitude_dims), e.g. 1:2 "
+                        "on T1p (velocity 1-form and its even companion)")
+    p.add_argument("--amplitude-power", type=int, default=None, metavar="P",
+                   help="the output is multiplied by s^P (default 1; 2: homogeneous of degree two in the amplitude "
+                        "columns, e.g. pressure for a velocity 1-form; RHMPConfig.amplitude_power)")
+    p.add_argument("--amplitude-energy", action="store_true",
+                   help="the output factor s is the field magnitude of the amplitude 1-form (Galerkin energy density "
+                        "over the domain, mesh independent) instead of the RMS cochain value "
+                        "(RHMPConfig.amplitude_energy)")
+    p.add_argument("--readout-energy", type=int, default=None, metavar="H",
+                   help="node_scalar readout with H Galerkin energy densities of projections of the edge features "
+                        "at the vertices (RHMPConfig.readout_energy; default 0)")
+    p.add_argument("--readout-energy-clip", type=float, default=None, metavar="C",
+                   help="bound the energy channels: q -> C tanh(q / C) (RHMPConfig.readout_energy_clip; default off)")
+    p.add_argument("--no-kutta", action="store_true",
+                   help="'project' layers without the harmonic (Kutta) correction (RHMPConfig.project_harmonic=False)")
+    p.add_argument("--kutta-range", type=float, default=None, help="bound of the log Kutta weights (default 8)")
+    p.add_argument("--kutta-corner", type=float, default=None, metavar="S",
+                   help="corner prior of the Kutta weights with initial slope S (RHMPConfig.kutta_corner; default off)")
+    p.add_argument("--project-solver", default=None, choices=["cg", "direct", "dense"],
+                   help="solver of 'project' layers: cg (default), direct (sparse LU on the CPU, diagonal metrics) or "
+                        "dense (batched Cholesky on the device, diagonal and tensor metrics, one graph per batch)")
+    p.add_argument("--readout-hidden", type=int, default=None, help="hidden width of the gated cochain head (16)")
+    p.add_argument("--lifting", default=None, choices=["mlp", "linear"],
+                   help="lifting of the field inputs (default mlp; linear: x_0 = W f_0, no geometry or even gates)")
+    p.add_argument("--readout-head", default=None, choices=["mlp", "linear"],
+                   help="potential head of the grad readout (default mlp; linear: phi = Lin_nobias(x_0))")
+    p.add_argument("--fit-readout", action="store_true",
+                   help="initialise a linear readout by least squares on the first training batch (as --solver-mode "
+                        "does)")
     p.add_argument("--identity-metric", action="store_true")
     p.add_argument("--star", default="cotan", choices=["cotan", "barycentric", "unit"])
     p.add_argument("--vector-mode", default=None, choices=["ls", "direct"], help="default: task specific")
@@ -275,6 +367,19 @@ def build_config(task: TaskData, args: argparse.Namespace):
         if "learn_metric" not in fields:
             raise ValueError("this RHMP version has no learn_metric (--no-learn-metric)")
         extra["learn_metric"] = False
+    if getattr(args, "resolvent_physical", False):
+        extra["resolvent_normalize"] = False
+    if getattr(args, "transport", None):
+        if "transport" not in fields:
+            raise ValueError("this RHMP version has no transport term (--transport)")
+        spec = json.loads(args.transport) if isinstance(args.transport, str) else dict(args.transport)
+        if not isinstance(spec, dict):
+            raise ValueError("--transport must be a JSON object")
+        extra["transport"] = spec
+    if getattr(args, "no_metric_geo", False):
+        if "metric_geo" not in fields:
+            raise ValueError("this RHMP version has no metric_geo (--no-metric-geo)")
+        extra["metric_geo"] = False
     if getattr(args, "metric_ref", None):
         if "metric_reference" not in fields:
             raise ValueError("this RHMP version has no metric_reference (--metric-ref)")
@@ -292,13 +397,51 @@ def build_config(task: TaskData, args: argparse.Namespace):
     for flag, key, val in (("metric_type", "metric_type", None), ("resolvent_iters", "resolvent_iters", None),
                            ("resolvent_grad", "resolvent_grad", None), ("solve_iters", "solve_iters", None),
                            ("solve_bc", "solve_bc", None), ("tensor_param", "tensor_param", tparam),
-                           ("solve_precond", "solve_precond", None)):
+                           ("solve_precond", "solve_precond", None), ("solve_picard", "solve_picard", None),
+                           ("picard_relax", "picard_relax", None), ("solve_tol", "solve_tol", None),
+                           ("picard_init", "picard_init", None)):
         val = getattr(args, flag, None) if val is None else val
         if val is None or (key == "metric_type" and val == "diag" and key not in fields):
             continue
         if key not in fields:
             raise ValueError(f"this RHMP version does not support --{flag.replace('_', '-')}")
         extra[key] = val
+    if getattr(args, "amplitude", None):
+        if "amplitude_dims" not in fields:
+            raise ValueError("this RHMP version has no amplitude_dims (--amplitude)")
+        amp = {}
+        for item in str(args.amplitude).split(","):
+            k, n = (int(v) for v in item.split(":"))
+            if not 1 <= n <= task.in_dims.get(k, 0):
+                raise ValueError(f"--amplitude {item}: N must be in 1..{task.in_dims.get(k, 0)} (columns of degree {k})")
+            amp[k] = n
+        extra["amplitude_dims"] = amp
+    for flag, key in (("term_gates", "term_gates"), ("cochain_head", "cochain_head"),
+                      ("readout_hidden", "readout_hidden"), ("lift_context", "lift_context"),
+                      ("lift_vertex", "lift_vertex"), ("readout_layers", "readout_layers"),
+                      ("readout_depth", "readout_depth"), ("readout_skip", "readout_skip"),
+                      ("readout_spatial", "readout_spatial"), ("readout_wedge", "readout_wedge"),
+                      ("frozen_units", "frozen_units"), ("amplitude_power", "amplitude_power"),
+                      ("amplitude_energy", "amplitude_energy"), ("readout_energy", "readout_energy"),
+                      ("kutta_range", "kutta_range"), ("project_solver", "project_solver"),
+                      ("readout_energy_clip", "readout_energy_clip"), ("kutta_corner", "kutta_corner")):
+        val = getattr(args, flag, None)
+        if val is None or val is False:
+            continue
+        if key not in fields:
+            raise ValueError(f"this RHMP version does not support --{flag.replace('_', '-')}")
+        extra[key] = val
+    fdesc = getattr(args, "frozen_descriptors", None) or ("mesh" if getattr(args, "no_frozen_descriptors", False)
+                                                          else None)
+    if fdesc is not None:
+        if not getattr(args, "frozen_units", False):
+            raise ValueError("--frozen-descriptors / --no-frozen-descriptors need --frozen-units")
+        extra["frozen_descriptors"] = {"train": True, "mesh": False, "auto": "auto"}[fdesc]
+    if getattr(args, "no_kutta", False):
+        extra["project_harmonic"] = False
+    for flag in ("lifting", "readout_head"):
+        if getattr(args, flag, None):
+            extra[flag] = getattr(args, flag)
     if args.connection_odd is None:
         conn_odd = bool(conn) and task.name in ("T7", "T7f")   # SU(2): connection also through the odd path
     else:
@@ -366,9 +509,14 @@ def make_batch(task: TaskData, idx: Tensor, device, cache: dict | None = None):
 
 
 def model_output(task: TaskData, fwd, xb: dict, K) -> Tensor:
-    """Model prediction in the task's target space (applies ``task.output_map`` when present)."""
+    """Model prediction in the task's target space (applies ``task.output_map`` when present; a map with
+    ``takes_complex = True`` is called as ``output_map(y, K)``, e.g. a per-mesh geometric map on block-diagonal
+    batches of variable meshes)."""
     y = fwd(xb, K)
-    return task.output_map(y) if task.output_map is not None else y
+    om = task.output_map
+    if om is None:
+        return y
+    return om(y, K) if getattr(om, "takes_complex", False) else om(y)
 
 
 def batch_loss(model, task: TaskData, idx: Tensor, device=None, fwd=None) -> Tensor:
@@ -419,7 +567,8 @@ def predict(model, task: TaskData, idx: Tensor, batch_size: int, device, fwd=Non
                         target_degree=task.target_degree, target_kind=task.target_kind, in_dims=task.in_dims,
                         even_dims=task.even_dims, connection_dims=task.connection_dims, split=task.split,
                         x_stats=task.x_stats, y_stats=task.y_stats, spatial_dim=task.spatial_dim,
-                        out_dim=task.out_dim, output_map=task.output_map, readout=task.readout)
+                        out_dim=task.out_dim, output_map=source.get("output_map", task.output_map),
+                        readout=task.readout)
     else:
         view = task
     batches = list(iterate_indices(idx, batch_size, shuffle=False))
@@ -450,6 +599,14 @@ def evaluate(model, task: TaskData, idx: Tensor, batch_size: int, device, *, fwd
     model.train(was)
     return M.summarize(pred, tgt, task.y_stats.as_tuple(), r2_std=task.meta.get("r2_std"), n_samples=n_samples,
                        prefix=prefix, center=task.target_kind != "cochain")
+
+
+def needs_whitney(model_cfg: dict) -> bool:
+    """Whether a saved model configuration uses the Whitney / Galerkin blocks of the complexes (tensor metrics, the
+    energy readout, the energy amplitude, the field-energy invariant of Picard solve layers); the loaders drop them
+    otherwise."""
+    return (model_cfg.get("metric_type") == "tensor" or bool(model_cfg.get("readout_energy"))
+            or bool(model_cfg.get("amplitude_energy")) or bool(model_cfg.get("solve_picard")))
 
 
 def _cond_summary(diag: dict, suffix: str | None = None) -> dict:
@@ -485,12 +642,17 @@ def _rng_state(gen: torch.Generator) -> dict:
 
 
 def _set_rng_state(st: dict, gen: torch.Generator) -> None:
+    # the states are byte tensors that must live on the CPU (a checkpoint loaded with map_location=cuda moves them)
+    cpu = lambda t: t.cpu() if isinstance(t, Tensor) else t  # noqa: E731
     random.setstate(st["python"])
     np.random.set_state(st["numpy"])
-    torch.set_rng_state(st["torch"])
-    gen.set_state(st["batch_gen"])
+    torch.set_rng_state(cpu(st["torch"]))
+    gen.set_state(cpu(st["batch_gen"]))
     if "cuda" in st and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(st["cuda"])
+        try:
+            torch.cuda.set_rng_state_all([cpu(t) for t in st["cuda"]])
+        except (RuntimeError, IndexError):      # written on a host with a different number of GPUs
+            pass
 
 
 def _run_signature(args: argparse.Namespace) -> dict:
@@ -500,7 +662,19 @@ def _run_signature(args: argparse.Namespace) -> dict:
             "metric_type", "resolvent_iters", "resolvent_grad", "metric_ref", "abs_scale", "latent")
     sig = {k: getattr(args, k) for k in keys}
     for k, default in (("material", None), ("solver_mode", False), ("solve_iters", None), ("solve_bc", None),
-                       ("tensor_param", None), ("aux_pde", 0.0), ("solve_precond", None)):   # only when set, so that
+                       ("tensor_param", None), ("aux_pde", 0.0), ("solve_precond", None), ("term_gates", False),
+                       ("cochain_head", None), ("readout_hidden", None), ("amplitude", None),
+                       ("lift_context", None), ("lift_vertex", False),
+                       ("readout_layers", None), ("readout_depth", None),
+                       ("readout_skip", False), ("readout_spatial", False),
+                       ("readout_wedge", None), ("frozen_units", False),
+                       ("frozen_descriptors", None), ("no_frozen_descriptors", False), ("amplitude_power", None),
+                       ("amplitude_energy", False), ("readout_energy", None), ("no_kutta", False),
+                       ("kutta_range", None), ("project_solver", None),
+                       ("readout_energy_clip", None), ("kutta_corner", None), ("lifting", None),
+                       ("readout_head", None), ("transport", None),
+                       ("resolvent_physical", False), ("solve_picard", None), ("picard_relax", None),
+                       ("solve_tol", None), ("no_metric_geo", False), ("picard_init", None)):  # only when set, so that
         v = getattr(args, k, default)                                                      # runs without them resume
         if v != default:
             sig[k] = v
@@ -591,11 +765,13 @@ def run(args: argparse.Namespace, task: TaskData | None = None) -> dict:
             kw["output_map"] = False
         if args.data_on != "auto":
             kw["keep_on"] = str(device) if args.data_on == "device" else "cpu"
-        need_whitney = getattr(args, "model", "rhmp") == "rhmp" and getattr(args, "metric_type", "diag") == "tensor"
+        need_whitney = getattr(args, "model", "rhmp") == "rhmp" and (
+            getattr(args, "metric_type", "diag") == "tensor" or bool(getattr(args, "readout_energy", None))
+            or bool(getattr(args, "amplitude_energy", False)) or bool(getattr(args, "solve_picard", None)))
         if args.eval_ckpt is not None:          # the evaluated run decides (its saved model config)
             try:
                 rconf = json.load(open(os.path.join(args.eval_ckpt, "config.json")))
-                need_whitney = rconf.get("model", {}).get("metric_type") == "tensor"
+                need_whitney = needs_whitney(rconf.get("model", {}))
             except (OSError, ValueError):
                 need_whitney = True
         if not need_whitney:
@@ -642,10 +818,14 @@ def run(args: argparse.Namespace, task: TaskData | None = None) -> dict:
         model = RHMP(cfg, task.geo_dims).to(device)
         if getattr(cfg, "latent_dims", None):
             model.init_latents(task.K)          # latent fields must exist before the optimizer is built
+        if getattr(cfg, "frozen_units", False):
+            if task.variable_mesh:
+                raise ValueError("--frozen-units needs a shared-mesh task (the normalisers of the training mesh)")
+            model.freeze_units(task.K)          # stored in the state dict, so best.pt / last.pt carry them
     else:
         model, model_info, task = _build_baseline(args, task, device)
     n_params = model.num_parameters()
-    if model_name == "rhmp" and getattr(args, "solver_mode", False) and \
+    if model_name == "rhmp" and (getattr(args, "solver_mode", False) or getattr(args, "fit_readout", False)) and \
             not (os.path.exists(os.path.join(out, "last.pt")) and not args.no_resume):
         # the solver class is exact up to the gain of lifting x readout: least-squares readout from the first training
         # batch instead of learning a gain of O(100) from a random start
@@ -654,7 +834,7 @@ def run(args: argparse.Namespace, task: TaskData | None = None) -> dict:
         idx0 = task.split[0][:bs0]
         K0, xb0, yb0 = make_batch(task, idx0 if task.variable_mesh else idx0.to(device), device)
         rel0 = model.fit_linear_readout_(xb0, K0, yb0, output_map=task.output_map)
-        _log(f"  solver mode: least-squares readout from the first training batch (relative residual {rel0:.2e})", args.quiet)
+        _log(f"  least-squares readout from the first training batch (relative residual {rel0:.2e})", args.quiet)
     fwd = torch.compile(model, dynamic=task.variable_mesh, backend=args.compile_backend) if args.compile else model
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.eta_min)
@@ -795,7 +975,10 @@ def run(args: argparse.Namespace, task: TaskData | None = None) -> dict:
         result["test100"] = evaluate(model, task, pe, ebs, device)
     for name, src in task.extra_tests.items():
         idx = torch.arange(len(src["target"]))
-        result[name] = evaluate(model, task, idx, ebs, device, source=src)
+        try:
+            result[name] = evaluate(model, task, idx, ebs, device, source=src)
+        except (RuntimeError, ValueError) as err:   # e.g. a model tied to its training grid size (DeepONet)
+            result[name] = {"error": f"{type(err).__name__}: {err}"[:500]}
     result.update({
         "test_seconds": time.time() - t2, "wall_clock_s": t_fit, "load_seconds": t_load,
         "epochs_run": len(history), "s_per_epoch": float(np.mean([h["time"] for h in history])) if history else None,
@@ -808,7 +991,8 @@ def run(args: argparse.Namespace, task: TaskData | None = None) -> dict:
         "complete": len(history) >= args.epochs,
     })
     _write_json(res_path, result)
-    extra = "".join(f" {k}_R2={result[k]['R2']:.4f}" for k in ("test100", *task.extra_tests) if k in result)
+    extra = "".join(f" {k}_R2={result[k]['R2']:.4f}" for k in ("test100", *task.extra_tests)
+                    if k in result and "R2" in result[k])
     _log(f"[{args.task}/{mode}] best val R2={best_r2:.4f}@{best_ep} test R2={test['R2']:.4f} "
          f"SSIM={test['SSIM']:.4f} Pearson={test['Pearson']:.4f} NRMSE={test['NRMSE']:.4f}{extra} "
          f"({t_fit:.0f}s, {result['s_per_epoch']:.1f} s/epoch, {n_params/1e6:.3f}M params)", q)
@@ -930,6 +1114,10 @@ def _renormalize(task: TaskData, train_summary: dict) -> TaskData:
         task.inputs = {k: cx(k, v) for k, v in task.inputs.items()}
         task.target = cy(task.target)
     for src in task.extra_tests.values():
+        if isinstance(src["inputs"], dict):                     # one shared complex: (N, n_k, F) tensors
+            src["inputs"] = {k: cx(k, v) for k, v in src["inputs"].items()}
+            src["target"] = cy(src["target"])
+            continue
         src["inputs"] = [{k: cx(k, v) for k, v in d.items()} for d in src["inputs"]]
         src["target"] = [cy(y) for y in src["target"]]
     task.x_stats = {k: conv_x[k][1] for k in conv_x}
@@ -988,8 +1176,8 @@ def eval_v1(args: argparse.Namespace, task: TaskData, device, out: str) -> dict:
     """Evaluate a v1 ``GaugeHodgeNetwork`` checkpoint on the legacy data of ``task`` with the v2 metrics.
 
     The v1 model (vendored in ``rhmp.baselines.v1``) is rebuilt exactly as the v1 evaluation script
-    ``compute_all_metrics.py`` does; predictions are made per sample (``--v1-eval-batch 1``, as for the v1 paper
-    tables) because v1's ``forward_batch`` couples the samples of a batch through the metric.  Writes
+    ``compute_all_metrics.py`` does; predictions are made per sample (``--v1-eval-batch 1``, as in the original v1
+    evaluation) because v1's ``forward_batch`` couples the samples of a batch through the metric.  Writes
     ``result_v1.json``.
     """
     from rhmp.baselines.v1.gauge_hodge_mp.cell_complex import CellComplex

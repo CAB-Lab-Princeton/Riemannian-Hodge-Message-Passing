@@ -11,7 +11,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 _LAZY = {
     "RHMP": ("model", "RHMP"),

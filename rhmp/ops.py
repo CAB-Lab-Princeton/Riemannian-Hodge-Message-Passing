@@ -100,7 +100,7 @@ def _cast_csr(A: Tensor, dtype: torch.dtype) -> Tensor:
 # ----------------------------------------------------------------------------------------------
 def _addmm0(A: Tensor, x2: Tensor) -> Tensor:
     # addmm with beta=0 into an uninitialised output: bitwise identical to torch.sparse.mm but skips its
-    # zero-fill and extra scaling pass (1.6-2.3x faster at T6 size on CUDA, see bench/RESULTS_ops.md);
+    # zero-fill and extra scaling pass (1.6-2.3x faster at T6 size on CUDA);
     # beta=0 means the output's initial contents are never read (NaN-safe).
     out = torch.empty(A.shape[0], x2.shape[1], dtype=x2.dtype, device=x2.device)
     return torch.addmm(out, A, x2, beta=0.0)

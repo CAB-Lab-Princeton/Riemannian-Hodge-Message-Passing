@@ -2,7 +2,7 @@
 # Adapted from `download.py` of the RHMP v1 code base, https://github.com/ContinuumCoder/Riemannian-Hodge-Message-Passing
 # (paper: "Learning Discrete Riemannian Metrics for Physical Fields with Cochain-Frame Equivariance",
 # Zheng & Allen-Blanchette, arXiv:2608.14556).  Same OSF archives; the v1 checkpoints are placed in `checkpoints_v1/`.
-"""Download the v1 paper datasets (and optionally the v1 checkpoints) from OSF.
+"""Download the original data sets of the paper (and optionally the v1 checkpoints) from OSF.
 
     python3 datasets/download_v1.py              # datasets/*.pkl                      (1.1 GB archive)
     python3 datasets/download_v1.py --ckpt       # + checkpoints_v1/ (seed 42)          (834 MB archive)

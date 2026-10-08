@@ -12,11 +12,14 @@ product broadcast over the trailing dimensions; `|A|` is the entrywise absolute 
 diagonal Hodge star stored as a vector `(n_k,)`.
 
 Contents: [1 Complex](#1-cochain-complex) · [2 Stars and geometry](#2-reference-hodge-stars-and-invariant-geometry) ·
+[2b Periodic complexes](#2b-periodic-complexes-flat-torus) ·
 [3 Metric](#3-bounded-log-metric) · [4 Blocks](#4-normalised-metric-hodge-blocks) ·
-[5 Layer](#5-the-message-passing-layer) · [6 Lifting](#6-lifting-inputs-on-any-degree) ·
+[5 Layer](#5-the-message-passing-layer) · [5b Upgrades](#5b-optional-layer-upgrades-homogeneous-gates-and-per-term-gates) ·
+[6 Lifting](#6-lifting-inputs-on-any-degree) ·
 [7 Readouts](#7-readouts) · [8 Tensor metric](#8-whitney-galerkin-tensor-metric) ·
 [9 Resolvent](#9-resolvent-layer) · [9b Solve layers](#9b-solve-layers-and-solver-mode) ·
-[10 DEC toolkit](#10-dec-toolkit) · [11 Symmetries](#11-summary-of-exact-properties)
+[9c Projection, energy readout, similarity](#9c-projection-layers-energy-readout-and-dynamic-similarity) ·
+[9d Transport](#9d-transport-term) · [10 DEC toolkit](#10-dec-toolkit) · [11 Symmetries](#11-summary-of-exact-properties)
 
 ---
 
@@ -86,6 +89,30 @@ Inside the model the stars are normalised per graph by their geometric mean,
 `⋆̂_k = ⋆_k / exp(mean_graph log ⋆_k)` (`rhmp.layers.make_context`).  Every operator below is invariant under a
 per-sample rescaling of the stars and metrics, so this is numerical hygiene, and together with the scale-invariant
 descriptors it makes the network exactly invariant to the length unit (section 11).
+
+## 2b. Periodic complexes (flat torus)
+
+`CochainComplex.from_grid(shape, spacing, periodic=True)` (and `from_triangles` / `from_polygons` with
+`period=(L_x, L_y)`) build a complex on a flat torus: the cells of the squares `(i, j)`, `i < n_x`, `j < n_y`, join
+vertex `(i, j)` to `((i+1) mod n_x, (j+1) mod n_y)`.  The incidence is built exactly as for any complex, so
+`d_{k+1} d_k = 0`; Euler characteristic 0, Betti numbers `(1, 2, 1)`, no boundary.  A flat torus has no isometric
+embedding in R^2, so geometry is intrinsic: every vector between two vertices of one cell is its minimal image
+(`rhmp.geometry.min_image`, `d - L round(d / L)` per periodic axis), i.e. every cell is measured in its own unwrapped
+frame (`rhmp.geometry.local_cell_positions`, `K.cell_positions(k)`), and `K.edge_vectors()` returns minimal images.
+All cells of the regular torus are congruent, so the stars are constant (`⋆_0 = s_x s_y`, `⋆_1 = s_y/s_x` on x-edges,
+`s_x/s_y` on y-edges, `⋆_2 = 1/(s_x s_y)` for quads) and the descriptors equal those of interior cells of a plane grid.
+Positions are kept in the fundamental domain; everything that uses geometry (stars, descriptors, Whitney blocks,
+signed face areas of output maps, edge vectors of vector readouts and of the baselines) goes through the minimal
+images.
+
+| guarantee | tests |
+|---|---|
+| `d d = 0`, Euler characteristic, Betti numbers (1, 2, 1), two cofaces per edge, quads and three triangulations | `test_periodic.py::test_periodic_grid_topology` |
+| vertex order `field[ix, iy].reshape(-1)`, CCW unwrapped faces, minimal-image edge vectors | `test_periodic.py::test_periodic_vertex_order_orientation_and_edge_vectors` |
+| uniform stars, descriptors equal to the interior of a plane grid, rectangular spacing | `test_periodic.py::test_periodic_geometry_is_uniform_and_matches_interior`, `::test_periodic_rectangular_stars` |
+| explicit builders with `period` reproduce `from_grid`; batches, `to()`, Whitney blocks | `test_periodic.py::test_periodic_builders_agree`, `::test_periodic_batch_to_and_whitney` |
+| O(C), relabelling, face flips, cyclic shifts (translations of the torus), batch independence | `test_periodic.py::test_periodic_OC_equivariance`, `::test_periodic_vertex_relabelling`, `::test_periodic_face_orientation_flip`, `::test_periodic_cyclic_shift_equivariance`, `::test_periodic_batch_independence` |
+| baselines commute with cyclic shifts (edge vectors from the complex) | `test_periodic.py::test_baselines_commute_with_cyclic_shifts`, `::test_adapter_uses_complex_edge_vectors` |
 
 ## 3. Bounded log-metric
 
@@ -178,6 +205,67 @@ CSR operators (`A diag(s)`), so no extra elementwise pass runs.
 | `L_up` of degree 0 is resolution consistent (cotan Laplacian converging to `-Δ` under refinement) | `test_numerics.py::test_resolution_consistency_L_up` |
 | outputs independent of the length unit (scalars invariant, vectors scale as `1/c`) | `test_numerics.py::test_uniform_scaling_invariance` |
 
+## 4b. Optional: frozen units (`frozen_units`)
+
+The normalisers above are recomputed on every mesh: the reference stars are divided by their per-graph geometric
+mean `g_k`, the scale descriptors are `log(x / median_x)` over the mesh (section 2), and every block is divided by its
+per-graph Gershgorin bound `beta`.  This makes the model invariant to a global change of length unit, but on a mesh
+whose finest cells differ from the training mesh the learned filters meet a rescaled operator (on the graded grid of
+T1g, `beta_unit` of the vertex block is 131072 on the training grid G1 and 8192 on the uniform 32 x 32 grid).  With
+`frozen_units` the model stores the training-mesh values (`RHMP.freeze_units(K_train)`, buffers `frozen_log_gm`,
+`frozen_geo_<k>`, `frozen_beta`; the trainer calls it on the training complex) and uses them on every mesh:
+
+```
+log star_k^      = log star_k - log g_k(train)
+geo_k (relative) = log(x / median_x(train)) = geo_k + log median_x(mesh) - log median_x(train)
+beta(k, up)      = beta(H; mesh) * beta_unit(k, up; train) / beta_unit(k, up; mesh)
+```
+
+with `beta_unit` the unit-metric Gershgorin bound of the scaled block (`ops.beta_unit`), computed with the frozen
+stars.  On the training mesh every correction is exactly zero or one, so the output is bitwise unchanged and models
+trained without the option can be evaluated with it.  On a mesh with finer cells than the training mesh the frozen
+bound is smaller than the mesh's own, so `||L||` can exceed 1 (no longer guaranteed `<= 1`).  The readout's spatial
+stages (combinatorial Laplacian) and the output maps have no per-mesh normaliser.  Supported: diagonal metrics, scaling
+`'dec'` / `'none'`, polynomial layers.  With `frozen_descriptors=False` (trainer `--frozen-descriptors mesh`) only the
+operator normalisation is frozen (first and third line); the descriptors keep the medians of each mesh.  With
+`frozen_descriptors='auto'` (`--frozen-descriptors auto`) the choice is made per relative column and mesh: the
+reference also stores the range `[min, max]` of every descriptor column on the training mesh (buffers
+`frozen_geo_min_<k>`, `frozen_geo_max_<k>`), and a column is expressed in training-mesh units (second line) if the
+mesh's median of it in those units, `log median_x(mesh) - log median_x(train)`, lies in that range, else relative to the
+mesh's own median.  Stars and block bounds are frozen in every setting.  On the training mesh every median lies in its
+range (it is 0), so the output is again bitwise unchanged.
+
+Under uniform refinement or coarsening by a factor 2 the re-expressed cell-measure descriptors shift by `log 4`,
+outside the range the metric heads were trained on; `frozen_descriptors=False`, and `'auto'` for these columns, keep
+them relative while the operators keep the training units.
+
+The same frozen bounds serve the other per-mesh normalisers of the stack.  A tensor-metric block (section 8) is
+normalised by `rho * beta_unit(k, up; train)` (cross-up term: `sqrt(beta_unit(train)) rho`) instead of
+`rho * beta_unit(k, up; mesh)`, with `rho = max rowsum |H|` of the learned tensor metric as before; normalised resolvent
+layers (section 9) solve with the blocks bounded as above; the transport fluxes (section 9d) are divided by the frozen
+bound of the degree-0 up block.  Supported in addition: tensor metrics, normalised resolvent layers and transport
+fluxes with `norm='metric'`.  Refused: solve and projection layers and `resolvent_normalize=False` (physical
+operators with their own length scale), Jacobi scaling, and transport `norm='sample'` (a per-sample normaliser by design).  Note that
+`beta_unit` is a unit-metric bound: a block whose dependence on the cell size sits in the reference star inside `H`
+(the degree-1 down block with `H_0^{-1} ~ 1/star_0`, the degree-1 up block with `H_2 ~ star_2`) keeps a per-mesh
+normalisation; only blocks whose cell-size dependence sits in the scaling `s` (the degree-0 up block, the top-degree
+down block) are expressed in training-mesh units.
+
+| guarantee | tests |
+|---|---|
+| identical output on the training mesh (bitwise on the CPU; Delaunay, mixed polygons, tets, periodic and graded quads; fp32 and fp64) | `test_frozen_units.py::test_identical_on_the_training_mesh` |
+| stars, descriptors and bounds follow the definitions above on another mesh | `test_frozen_units.py::test_normalisers_follow_the_definition` |
+| a globally scaled mesh changes the output (the default model is invariant) | `test_frozen_units.py::test_global_scale_changes_the_output` |
+| rotations / reflections, relabelling, face orientation flips, block-diagonal batches; checkpoints; refusals | `test_frozen_units.py::test_rigid_motions`, `::test_relabelling_and_orientation_flips`, `::test_block_diagonal_batches`, `::test_checkpoints_and_refusals` |
+| `frozen_descriptors=False`: identical on the training mesh; frozen stars and bounds, the mesh's own descriptors | `test_frozen_units.py::test_operators_only` |
+| `frozen_descriptors='auto'`: identical on the training mesh; reproduces `True` on a mesh inside the training ranges and `False` in the scale columns of a uniformly refined mesh | `test_frozen_units.py::test_auto_descriptors` |
+| identical output on the training mesh (bitwise on the CPU; Delaunay, sphere, tets, mixed polygons; fp32 and fp64) for diagonal and tensor metrics, resolvent layers and the transport term | `test_frozen_units_tensor.py::test_identical_on_the_training_mesh` |
+| stars, descriptors and bounds follow the definitions above on another mesh, incl. the tensor bound `rho * beta_unit(train)` and the star-flux bound of the transport term | `test_frozen_units_tensor.py::test_normalisers_follow_the_definition` |
+| operators only (`frozen_descriptors=False`): identical output on the training mesh; on another mesh the same stars, blocks and bounds, the mesh's own descriptors; checkpoints, refusals, trainer flag | `test_frozen_units_tensor.py::test_operators_only_identical_on_the_training_mesh`, `::test_operators_only_differs_only_through_the_descriptors`, `::test_operators_only_checkpoints_refusals_and_trainer_flag` |
+| `frozen_descriptors='auto'` with the tensor metric, resolvent layer and transport term: identical on the training mesh; each relative column follows `True` inside the training range and `False` outside; stars and bounds as `False` | `test_frozen_units_tensor.py::test_auto_descriptors_follow_the_rule` |
+| a globally scaled mesh changes the output (the default model is invariant) | `test_frozen_units_tensor.py::test_global_scale_changes_the_output` |
+| rigid motions (exact on the same complex; rebuilt complexes), relabelling, face orientation flips, block-diagonal batches; checkpoints; refusals; trainer flag | `test_frozen_units_tensor.py::test_rigid_motions`, `::test_relabelling_and_orientation_flips`, `::test_block_diagonal_batches`, `::test_checkpoints_and_refusals`, `::test_trainer_frozen_units_flag` |
+
 ## 5. The message-passing layer
 
 A polynomial layer (`rhmp.layers.RHMPLayer`, `kind='poly'`) updates all degrees synchronously from its input:
@@ -201,6 +289,36 @@ parity), `cross=False`, `poly_order=1`, `scaling='none'`, `identity_metric=True`
 | fused kernel equals the reference; gradients | `test_model.py::test_fused_matches_reference`, `test_numerics.py::test_fused_block_gradcheck` |
 | O(C)-equivariance of the stack (`propagate(x Q) = propagate(x) Q`, random orthogonal `Q` incl. reflections; 1e-5 fp32, 1e-10 fp64) for every variant | `test_equivariance.py::test_OC_equivariance`, `::test_OC_equivariance_variants`, `::test_hidden_is_lift_then_propagate` |
 | activation checkpointing gives identical gradients; bf16 AMP close to fp32 | `test_model.py::test_checkpoint_layers_same_gradients`, `::test_amp_matches_fp32` |
+
+## 5b. Optional layer upgrades: homogeneous gates and per-term gates
+
+The radial gate bounds every update by `γ` whatever the amplitude of the field (`|γ σ(.) m / r| <= γ` per cell), so a
+stack of such layers cannot represent a linear filter on inputs whose amplitude varies over orders of magnitude.  Two
+options replace it (defaults unchanged; `rhmp.layers.RadialGate`, `rhmp.layers.TermGate`):
+
+```
+gate='homog':   x_k <- x_k + γ_k g_k m_k,   g_k = 2 sigmoid(MLP(ξ_k)),   MLP: 2 -> 16 -> SiLU -> 1, last layer 0 (g = 1)
+                ξ_k = [ log((|m_k|^2/C + ε) / (|x_k|^2/C + ε)),  <x_k, m_k> / (C sqrt(|x_k|^2/C + ε) sqrt(|m_k|^2/C + ε)) ]
+                ε = 1e-6 (|x_k|^2 + |m_k|^2) / C                                   (per cell and sample)
+term_gates:     m_k = sum_j c_j g_{k,j} t_{k,j},   t_{k,j} in {L_up^p x_k, L_dn^p x_k (p = 1..P), T_up x_{k+1}, T_dn x_{k-1}}
+                g_k = 2 sigmoid(MLP(ξ_k)),  ξ_{k,j} = [ log((|t_j|^2/C + ε_j)/(|x_k|^2/C + ε_j)), <x_k, t_j>/(C sqrt(.) sqrt(.)) ]
+                MLP: 2 J -> 16 -> SiLU -> J, last layer 0 (g = 1: the plain polynomial message)
+```
+
+`ξ` is invariant under `(x, m) -> (λ x, λ m)` (the floor `ε` is relative), so for a fixed metric the update is
+homogeneous of degree one in the field amplitude, and with constant factors the layer is the linear filter
+`x + γ (sum_p c_p L^p x + w T x')`.  The factors are functions of O(C)-invariant inner products of odd x odd
+quantities, hence O(C)-invariant and even: the stack stays O(C)-equivariant, orientation-odd, E(n)-invariant and
+per sample.  (The metric is still a bounded function of `log1p` invariants, so a full layer is homogeneous only up to
+the bounded metric.)
+
+| guarantee | tests |
+|---|---|
+| O(C) equivariance (Delaunay, periodic quads, tets; scalings, untied, P = 3, no cross, resolvent layers) | `test_upgrades.py::test_OC_equivariance_upgrades` |
+| relabelling, face orientation flips, E(n), batch independence, gauge invariance | `test_upgrades.py::test_vertex_relabelling_upgrades`, `::test_face_orientation_flip_upgrades`, `::test_En_invariance_upgrades`, `::test_batch_independence_upgrades`, `::test_gauge_invariance_with_upgrades` |
+| identity at initialisation, scale invariance of the factors, finite on all-zero cells | `test_upgrades.py::test_homog_gate_identity_at_init_and_scale_invariance` |
+| zero-initialised term gates = the fused polynomial layer (1e-12, fp64) | `test_upgrades.py::test_term_gates_at_init_equal_the_plain_polynomial_layer` |
+| linear lifting + fixed metric + homogeneous gates: `y(λ f) = λ y(f)` (not with the radial gate) | `test_upgrades.py::test_homogeneous_model_is_homogeneous_of_degree_one` |
 
 ## 6. Lifting: inputs on any degree
 
@@ -269,6 +387,47 @@ invariant to the edge-orientation convention (`w_e` and `t_e` flip together).
 | scalar and cochain readouts E(n)-invariant, vectors equivariant (rotations, reflections, translations): complex rebuilt from transformed positions (1e-5; vectors 1e-4) and exact in fp64 (1e-10) | `test_equivariance.py::test_En_invariance_and_equivariance`, `::test_En_equivariance_exact_fp64` |
 | constraint readouts: `d_1 y = 0` (grad), `d_2 y = 0` (curl), `d^T y = 0` and zero vertex sums (div) to 1e-6, also on batches | `test_model.py::test_constraint_readouts` |
 | LS reconstruction exact for constant fields, tangent on surfaces, rank-deficient stars, gradcheck | `test_numerics.py::test_ls_readout_exact_for_constant_fields`, `::test_ls_readout_tangent_on_surfaces`, `::test_ls_solve_rank_deficient_and_well_posed`, `::test_vector_readout_gradcheck` |
+
+## 7b. Optional lifting and readout context, amplitude normalisation
+
+* `lift_context = p`: the even lifting gates `e_k` (k >= 1) also see `mean_{i in cell} P x_0` (`P: C -> p`), the
+  vertex quantities of the cell; `lift_vertex`: the vertex MLP also sees the DEC codifferential
+  `⋆_0^{-1} d_0^T (⋆_1 f_1^odd)` of the odd edge inputs and vertex means of `(f_1^odd)^2` and of the even edge inputs
+  (all even; connection and material columns excluded).
+* `cochain_head='gated'`: `y = W_2 (u ⊙ (1 + e))`, `u = W_1 x_k` (odd), `e = MLP([log1p u^2, log1p |x_k|^2/C,
+  even_k], geo_k)` (even, last layer 0).  `cochain_head='context'` (k >= 1): `u = W_1 x_k + W_c d_{k-1} x_{k-1}` and the
+  gate also sees `mean_{i in cell}(W_0 x_0 + b_0)`.  Odd times even: the output stays a cochain; the readout breaks
+  O(C) as every readout does (it fixes the frame).
+* `readout_layers='all'`: the odd part of a cochain head also reads the field of its degree after the lifting and
+  after every layer, `u = W_1 x_k + sum_l W_l x_k^(l)`: the stack applies one (input-dependent) operator to all hidden
+  channels, so a readout of the last layer sees `Φ(x)` only; reading every layer gives every output channel its own
+  polynomial in the stack's operators, and the stack stays O(C)-equivariant.
+* `readout_skip`: `u` also gets `S_k f_k^odd + S_{k-1} d_{k-1} f_{k-1}^odd` (raw odd inputs; e.g. the circulation of the
+  velocity 1-form on faces): a linear path from the inputs to the output.
+* `readout_depth = r`: `r - 1` further odd gated stages `u' = z + M z [+ N A z]`, `z' = u' ⊙ (1 + e'(...))`, with
+  `readout_spatial` the combinatorial Hodge Laplacian `A = d_{k-1} d_{k-1}^T + d_k^T d_k` of the readout degree
+  (odd to odd); `M`, `N` zero-initialised.
+* `readout_wedge = h` (gated / context head of `cochain:2`): `u` also gets `W_w (x_1 A ^ x_1 B)` with `A, B: C -> h`
+  (bias-free) and `W_w` zero-initialised, where `^` is the metric-free cup product of two primal 1-cochains on the
+  faces, `(a ^ b)_f = c_m sum_j (a_j b_{j+1} - a_{j+1} b_j)` over the boundary edges of the m-gon `f` in cyclic order
+  (`a_j = s_j a(e_j)` read along the face orientation, `c_m = 1 / (8 sin^2(pi/m))`: 1/6 for triangles, 1/4 for
+  quadrilaterals).  On triangles and convex quadrilaterals it is the integral of the wedge of the Whitney
+  interpolants, exact for constant forms (`dx ^ dy` = signed area).  It is antisymmetric, a true 2-cochain (sign flip
+  with the face orientation, invariant under edge flips and relabelling) and E(n)-invariant, and it is quadratic in
+  the edge features: with `x_1` holding the velocity 1-form `theta` and `delta_2 d_1 theta` it contains the advection
+  `theta ^ delta_2 d_1 theta = (v . grad omega) dA` of the vorticity 2-form, which a head that is odd in the features
+  cannot form.  The stack is unchanged (O(C)-equivariant; propagation only through the SPD metrics).
+* `amplitude_dims = {k: n}`: the first `n` columns of `inputs[k]` (e.g. a velocity 1-form and its even companion) are
+  divided by their per-sample RMS `s` and the output is multiplied by `s`: exactly homogeneous of degree one in that
+  amplitude; `s` is even, E(n)-, relabelling- and O(C)-invariant and per sample (per graph in batches).
+
+| guarantee | tests |
+|---|---|
+| gated / context heads: odd, linear at initialisation; relabelling, flips, E(n), batches | `test_upgrades.py::test_gated_head_is_odd_and_linear_at_init`, `::test_vertex_relabelling_upgrades`, `::test_face_orientation_flip_upgrades` |
+| multi-layer readout, deep / spatial heads, input skip: separate maps per layer, linear and odd at initialisation | `test_upgrades.py::test_multilayer_readout_reads_every_layer`, `::test_deep_head_is_linear_at_init_and_odd`, `::test_readout_skip_is_linear_in_the_inputs` |
+| face wedge exact for constant forms (triangles, quads, polygons up to 4 sides, tets, periodic wrap-around), antisymmetric, sign flip with face orientation; wedge head unchanged at initialisation, quadratic in the edge features, refused without a gated / context cochain:2 head; relabelling, flips, E(n), batches | `test_upgrades.py::test_face_wedge_exact_antisymmetric`, `::test_wedge_head_zero_at_init_and_quadratic`, `::test_vertex_relabelling_upgrades[wedge_head]`, `::test_face_orientation_flip_upgrades[wedge_head]`, `::test_En_invariance_upgrades`, `::test_batch_independence_upgrades` |
+| amplitude normalisation homogeneous of degree one; block-diagonal batches = parts | `test_upgrades.py::test_amplitude_normalisation_is_homogeneous`, `::test_amplitude_normalisation_block_diagonal` |
+| defaults unchanged, configurations without the new keys load | `test_upgrades.py::test_defaults_unchanged_and_old_configs_load`, `::test_trainer_flags` |
 
 ## 8. Whitney-Galerkin tensor metric
 
@@ -394,6 +553,147 @@ in a diagonal metric (the convex operator-identification loss `--aux-pde`).
 | two-level preconditioner: residual after 64 iterations reduced at least 5x, same solution and gradients, per sample and graph | `test_numerics.py::test_twolevel_preconditioner_cuts_solve_residual`, `::test_twolevel_preconditioner_is_per_sample_and_per_graph` |
 | material columns reach only the metric; the operator residual identifies the metric; `--material` / `--aux-pde` in the trainer | `test_numerics.py::test_material_columns_only_reach_the_metric`, `::test_operator_residual_identifies_the_metric`, `::test_trainer_solver_mode_material_aux_pde` |
 | `mdiv:1` conserves `sum ⋆_0 y` per graph in block-diagonal batches | `test_numerics.py::test_mdiv_readout_conserves_mass_in_block_diagonal_batches` |
+
+## 9c. Projection layers, energy readout and dynamic similarity
+
+Three optional components for fields that are determined globally by a 1-form (a flow around a body); defaults are
+unchanged.  Used together by the AirfRANS pressure tasks `AFPi*` (`rhmp/tasks/airfrans.py`).
+
+**Projection layer** (`cfg.layers=[..., 'project', ...]`, `RHMPLayer._project_forward`).  With the learned diagonal
+edge metric `H_1 = star_1 exp(a tanh MLP(psi_1))` of the layer (section 3; or the Whitney metric of section 8), the
+free vertices `f` (all vertices except `K.meta['dirichlet'][0]`, default the boundary vertices) and edge features `x_1`:
+
+```
+alpha = (d_0^T H_1 d_0)_ff^{-1} (d_0^T H_1 x_1)_f,   alpha = 0 on the fixed vertices        (metric_projection)
+u     = x_1 - d_0 alpha            H_1-orthogonal projection: d_0^T H_1 u = 0 on the free vertices
+gamma_r = c_r - d_0 alpha_r        the same solve applied to the generators c_r = K.meta['cohomology'][1]
+W     = star_1 exp(kappa),  kappa = a_K tanh MLP_K([geo_1, mean / |difference| of geo_0 over the two end vertices,
+                                                   even_1, log(star_1 |gamma|^2 / mean)])      (KuttaHead, zero-init)
+Gamma = <gamma, gamma>_W^{-1} <gamma, u>_W          per graph, sample and channel (r x r Gram matrix)
+m_1   = -a d_0 alpha - g sum_r Gamma_r gamma_r,     m_0 = b alpha / (sqrt(E_ref) L),     x_k <- gate_k(x_k, m_k)
+```
+
+`a = b = g = 1` at initialisation; `L^D` is the domain measure and `E_ref` the reference energy density of the graph
+(`rhmp.layers.reference_energy`: the Galerkin energy density of the amplitude 1-form when `amplitude_energy` is set,
+else `sum star_1 / sum star_0`), so the vertex update is the potential in units of field magnitude times domain size.
+For the 1-form `theta_e = u_inf . (x_dst - x_src)` of a uniform flow and `H_1 = star_1`, `u` is the P1 potential flow
+around the free part of the boundary (natural condition: no flux through it) whose perturbation potential vanishes on
+the fixed vertices.  The generators `c_r` are the harmonic representatives (`rhmp.dec.harmonic_generators`: closed,
+co-closed with the natural condition on every boundary loop, period 1 around hole `r`) of the crossing cochains of
+`rhmp.dec.cohomology_generators` (exactly closed, entries in {-1, 0, 1}); `u - sum_r Gamma_r gamma_r` is the
+`W`-orthogonal projection of `u` onto the complement of the circulation fields, which is the Kutta condition when `W`
+concentrates on the edges at a trailing edge (zero tangential velocity jump there).  The result does not depend on the
+sign, the scale or the representative of the generators, nor on the scale of `H_1`.  Everything is linear in `x_1` for
+fixed metrics and acts identically on every channel, so the stack stays O(C)-equivariant; the metrics see only
+invariants, so E(n) invariance, relabelling and orientation parity hold as for the other layers.  Solvers
+(`cfg.project_solver`): `'cg'` (Jacobi or two-level PCG, implicit gradients, `solve_iters` / `solve_tol`) or `'direct'`
+(one sparse LU per graph and sample on the CPU in float64, `rhmp.layers.direct_projection`; adjoint gradients
+`d x_1 = H (d_0 lam)`, `d H = sum_c (d_0 lam)(x_1 - d_0 alpha)`, `lam = (d_0^T H d_0)_ff^{-1} d alpha`).
+Optional corner prior (`cfg.kutta_corner = s > 0`): `kappa = a_K tanh(MLP_K(.) + s c_e)` with a learnable slope `s` and
+the corner indicator `c_e = max_{v in e} clamp((-defect_v - pi/2) / (pi/2), 0, 1)` of the boundary edges
+(`rhmp.layers.boundary_corner`; `defect_v = pi -` interior angle sum, the vertex descriptor): 0 on smooth or convex
+parts of the boundary, close to 1 at a sharp re-entrant corner such as a trailing edge seen from the fluid, where the
+potential flow is singular.  The weights then start at the classical Kutta condition instead of the uniform metric.
+
+**Energy readout** (`cfg.readout_energy = h`, `node_scalar` readout, simplicial complexes).  With `a = x_1 A`,
+`b = x_1 B` (`A, B: C -> h`, bias-free) and the Whitney mass blocks `M_f` of the top cells (the reference metric `H_1`
+of section 8):
+
+```
+q_i = sum_{f ∋ i} a_f^T M_f b_f / (E_ref sum_{f ∋ i} |f|)                 (h channels; rhmp.dec.vertex_energy)
+y   = W_2 SiLU(W_1 x_0 + b_1 + V q) + b_2 + w q                          (V, w zero-initialised)
+```
+
+`q` is the pointwise product `u . v` for the cochains of constant fields on any simplicial mesh (the lumped vertex
+formula `sum_{e ∋ i} star_1 a_e b_e / (2 star_0)` is off by tens of percent on graded meshes), in units of the
+reference energy: with `x_1` holding a velocity 1-form, `w q` contains the Bernoulli pressure `c - |u|^2 / 2`, a product
+that an O(C)-equivariant stack with a pointwise vertex readout cannot form.  It is the symmetric counterpart of the face
+wedge of section 7b; even, E(n)-, relabelling- and orientation-invariant; the stack is unchanged.  Numerical
+safeguards for meshes with slivers: cells with an aspect ratio `l_max^d / (d! |f|)` above `rhmp.dec.ASPECT_CAP = 32`
+are down-weighted by `(32 / aspect)^2` in the vertex average (their Galerkin blocks amplify the non-closed part of a
+cochain by the squared aspect ratio; no cell of the AFM meshes is affected, the largest aspect ratio there is 15.8),
+and `cfg.readout_energy_clip = c` bounds the channels, `q -> c tanh(q / c)` (default off; used on the T8 meshes, whose
+edge lengths span five orders of magnitude).
+
+**Dynamic similarity** (`cfg.amplitude_dims = {1: n}`, `amplitude_power = p`, `amplitude_energy`).  The amplitude
+columns are divided by their per-graph RMS `s` (section 7b) and the output is multiplied by `s_out^p`; with
+`amplitude_energy`,
+
+```
+s_out = s sqrt(E_ref),    E_ref = sum_f theta_f^T M_f theta_f / sum_f |f|     (theta: the RMS-normalised columns)
+```
+
+is the field magnitude of the 1-form (exactly `|u|` for a uniform field on any simplicial mesh, while the RMS of the
+cochain values scales with the edge lengths), so the model is exactly homogeneous of degree `p` in the amplitude and
+its output scale does not depend on the mesh resolution.  `p = 2` for a pressure driven by a velocity 1-form: the model
+is a function of the nondimensional configuration times the dynamic pressure.  The Galerkin blocks are stored in
+float32; the exactness statements hold to that rounding (times the squared aspect ratio of a cell).
+
+| guarantee | tests |
+|---|---|
+| crossing cochains exactly closed, period 1, none on a disk, two independent ones for two holes; harmonic representatives closed and co-closed; refused for inconsistent orientations | `test_pressure.py::test_cohomology_generators_annulus_disk_two_holes` |
+| `meta['dirichlet']` / `meta['cohomology']` travel through block-diagonal batches (zero-padded generators) | `test_pressure.py::test_batch_carries_domain_fields` |
+| Whitney / vertex energies exact for constant fields; the energy amplitude is `|u|` on two resolutions | `test_pressure.py::test_whitney_energy_exact_for_constant_fields`, `::test_energy_amplitude_is_the_field_magnitude_on_any_mesh` |
+| projection: CG = two-level = direct, co-closed on the free vertices, idempotent, exact forms removed, independent of the scale of `H`, zero-mean potential without fixed vertices; adjoint gradients (gradcheck, CG = direct) | `test_pressure.py::test_metric_projection_cg_and_direct`, `::test_metric_projection_gradients` |
+| potential flow (closed, no flux through the wall), Kutta orthogonality, invariance to the generator's sign / scale and to circulation added to the input, zero circulation without generators | `test_pressure.py::test_potential_flow_and_kutta_projection` |
+| O(C) equivariance, E(n) (rotations and reflections, complex and generators rebuilt), relabelling, batches of meshes = parts | `test_pressure.py::test_OC_equivariance_projection`, `::test_En_invariance_projection`, `::test_vertex_relabelling_projection`, `::test_batch_of_meshes_equals_parts_projection` |
+| degree-two homogeneity; energy readout = plain readout at initialisation, clip; defaults, round trips, trainer flags | `test_pressure.py::test_degree_two_homogeneity_and_energy_readout_init`, `::test_defaults_unchanged_and_configs_round_trip`, `::test_trainer_flags_pressure` |
+| sliver down-weighting of the vertex energy (unchanged elsewhere, still exact for constant fields); `projection_fields` accessor (closed, Kutta-orthogonal, circulation only from the Kutta step) | `test_pressure.py::test_aspect_weighting_of_the_vertex_energy`, `::test_projection_fields_accessor` |
+| AFPi: same target and normalisation as AFP, exact `U^2` scaling in physical units, rigid rotations | `test_pressure.py::test_afpi_task_homogeneity_and_rotation` |
+
+## 9d. Transport term
+
+`cfg.transport` (`rhmp.transport`; empty = off, the default) adds the discrete Lie derivative of the vertex features
+along one or more transport fields to the vertex message of every poly and resolvent layer.  Scalar transport
+`d_t u + div(u v) = 0` is generated by an operator that is not symmetric, so the symmetric positive semi-definite
+Hodge blocks of sections 4-5 cannot represent it.
+
+A transport field `phi` is an odd, channel-invariant edge scalar: an odd input column of degree 1 (`inputs`, e.g. the
+velocity one-form `theta_e = (v_s + v_d)/2 . (x_d - x_s)`), a latent edge column (`latent`), or an O(C)-invariant
+odd contraction of the layer input (`hidden`: `tanh(<x_1, (|d_0| x_0)/2> / C)` and `tanh(d_0 (|x_0|^2 / (2C)))`).
+With the layer's edge metric `H_1` (the metric of the degree-0 up block; tensor metrics through their Galerkin
+action) and the degree-0 scaling `s = ⋆̂_0^{-1/2}` (`x = ⋆^{1/2} u`):
+
+```
+F      = (H_1 phi) / β_up0                                   flux through the dual edges (normalised metric)
+C(F) x = s ⊙ d_0^T ( F ⊙ |d_0| (s ⊙ x) ) / 2                  conservative, centred (dual-cell flux balance)
+A(F) x = s ⊙ |d_0|^T ( F ⊙ d_0 (s ⊙ x) ) / 2                  advective, centred,  A = C^T
+U(F) x = s ⊙ d_0^T ( |F| ⊙ d_0 (s ⊙ x) ) / 2                  upwind correction (graph Laplacian, weights |F|/2)
+T      = sum_j ( a_j C(F_j) + b_j A(F_j) + c_j U(F_j) )         a, b, c scalar per layer and field (init 0)
+m_0   += sum_{p=1..P} g_p T^p x_0,     g_1 = 1, g_{p>1} learned (init 0)
+```
+
+The conservative upwind flux is `C - U` (the first-order upwind finite-volume scheme on the barycentric dual cells),
+the advective upwind form `A + U`.  At the reference metric `H_1 = ⋆_1`, `⋆_1 phi` is the DEC flux of `v` through the
+dual edges, `⋆_0^{-1} C` discretises `-div(u v)` and `⋆_0^{-1} A` discretises `v . grad u` (for interior vertices of
+a Delaunay mesh `sum_{e ∋ i} ⋆_e e e^T = 2 A_i I`).  Properties:
+
+* linear in the hidden state and identical on every channel: `T(x Q) = (T x) Q` (O(C)); `phi` and `d_0` are odd, so
+  `C, A, U` are invariant under edge-orientation changes and vertex relabelling; only metrics, stars and incidences
+  enter (E(n)); per sample;
+* `C + A = diag(s^2 ⊙ d_0^T F)`; `C` and `U` conserve `sum_i ⋆_i^{1/2} x_i = sum_i ⋆_i u_i` exactly (`1^T d_0^T = 0`),
+  `A` does not; for a divergence-free flux (`d_0^T F = 0`, e.g. `F = d_1^T psi`) `C` is skew-symmetric;
+* norms: the row and column sums of `|C|, |A|, |U|` are bounded by `s_i [ |d_0|^T (|F| ⊙ |d_0| s) ]_i / 2`, so with
+  `norm='metric'` (default; `h = H_1 / β_up0` is the Gershgorin-normalised metric of the up block)
+  `||C||, ||A||, ||U|| <= max_e |phi_e| / 2` per sample, and the transport speed (the magnitude of `phi`) is kept;
+  `norm='sample'` divides every field operator by its own per-sample Gershgorin bound (`<= 1`; invariant to the
+  magnitude of the field);
+* `metric='star'` uses the reference star `⋆̂_1` instead of the learned `H_1` (geometric flux), for models whose learned
+  metric represents a material, e.g. an anisotropic diffusion tensor through the Galerkin tensor metric, that must
+  not weight the advective flux.
+
+Other degrees: features of degree `k >= 1` are orientation-odd, so `|d_k| x_k` is not a cochain and the construction
+is specific to the (even) vertex features; transport of k-forms needs an interior product with the flux (twisted)
+form of `v`, which the edge circulation does not determine.  Solve layers carry no transport term.
+
+| guarantee | tests |
+|---|---|
+| `A = C^T`, `C + A = diag(s^2 d_0^T F)`, `U` symmetric PSD and zero on constants; mass of `C x` and `U x` zero, of `A x` not (meshes with and without boundary, non-manifold, quads) | `test_transport.py::test_operator_identities_and_mass_conservation` |
+| `C` skew for divergence-free fluxes | `test_transport.py::test_divergence_free_flux_gives_skew_transport` |
+| `||C||, ||A||, ||U|| <= max|phi|/2` (`metric`) and `<= 1` (`sample`) against dense singular values, random `H` over `e^{±4}`, slivers; magnitude kept / removed; `metric='star'` independent of the learned metric | `test_transport.py::test_norm_bounds`, `::test_metric_norm_keeps_field_magnitude`, `::test_star_metric_uses_the_reference_star` |
+| `C - U` with `F = ⋆_1 phi` equals a hand-written upwind finite-volume step (1e-10) | `test_transport.py::test_matches_handwritten_upwind_finite_volumes` |
+| O(C)-equivariance with every transport variant (fp64 1e-10, fp32 1e-5), vertex relabelling and edge orientation (1e-5), face orientation flips, rigid motions (fp64 1e-10, rebuilt complex 1e-5), batch independence (shared and block-diagonal, 1e-6), per-graph mass conservation of the message | `test_transport.py::test_OC_equivariance_with_transport*`, `::test_vertex_relabelling_with_transport`, `::test_vertex_relabelling_with_latent_transport_field`, `::test_face_orientation_flip_with_transport`, `::test_rigid_motion_invariance_with_transport`, `::test_batch_independence_with_transport`, `::test_transport_message_conserves_mass_in_the_model` |
+| default off: no new state, old configurations load, zero coefficients reproduce the model without the term; checkpoint and trainer flag | `test_transport.py::test_default_off_reproduces_existing_models`, `::test_config_validation_and_roundtrip`, `::test_trainer_transport_flag` |
 
 ## 10. DEC toolkit
 

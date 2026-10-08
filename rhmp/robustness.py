@@ -52,11 +52,12 @@ def rebuild(K, pos_new: torch.Tensor, top_new: torch.Tensor):
     from rhmp.complex import CochainComplex
     kind, star = K.meta.get("cell_type"), K.meta.get("star_type", "cotan")
     dev = K.device
+    period = K.meta.get("period")                           # periodic complexes stay periodic
     if K.dim == 3:
         return CochainComplex.from_tetrahedra(pos_new.double(), top_new, star=star, device=dev)
     if kind == "triangle":
-        return CochainComplex.from_triangles(pos_new.double(), top_new, star=star, device=dev)
-    return CochainComplex.from_polygons(pos_new.double(), top_new, star=star, device=dev)
+        return CochainComplex.from_triangles(pos_new.double(), top_new, star=star, device=dev, period=period)
+    return CochainComplex.from_polygons(pos_new.double(), top_new, star=star, device=dev, period=period)
 
 
 def remap_complex(K, *, perm=None, flip_frac=0.0, Q=None, shift=None, seed=0):
@@ -71,6 +72,11 @@ def remap_complex(K, *, perm=None, flip_frac=0.0, Q=None, shift=None, seed=0):
         ``(K_new, maps)``, ``maps[k] = (idx, sign)``: ``new_k = old_k[idx] * sign`` (the sign only for odd data).
     """
     n0 = K.n[0]
+    if Q is not None and K.meta.get("period") is not None:
+        Qa, L = np.abs(np.asarray(Q, dtype=np.float64)), np.asarray(K.meta["period"], dtype=np.float64)
+        if not (np.allclose(Qa, np.round(Qa)) and np.allclose(Qa[:len(L), :len(L)] @ L, L)):
+            raise ValueError("an orthogonal map of a periodic complex must map its period lattice onto itself "
+                             "(signed axis permutations with equal periods)")
     pos = K.pos.double().cpu()
     top = K.cells[K.dim].long().cpu()
     perm = torch.arange(n0) if perm is None else perm.cpu()
@@ -137,6 +143,8 @@ def _rebuild_map(task, K_new, *, Q=None, perm=None):
     om = task.output_map
     if om is None:
         return None
+    if getattr(om, "takes_complex", False):            # computed from the complex it is called with
+        return om
     from rhmp.data import OutputMap
     from rhmp.tasks.paper import oriented_face_to_node
     if om.kind == "sparse":

@@ -8,7 +8,6 @@
 #
 #   bash scripts/run_aniso.sh                                                        # core preset (default)
 #   PRESET=full bash scripts/run_aniso.sh                                            # every task and variant
-#   HOST=<ssh host> GPU=1 NAME=aniso tools/run_bg.sh bash scripts/run_aniso.sh       # detached on a remote host
 # TASKS, VARIANTS and MODELS override the preset (e.g. TASKS="AHP_r100" VARIANTS="diag-solver+ref tensor-solver+ref"
 # MODELS="": the two solver-mode variants on AHP_r100, no baselines); EPOCHS=2 EXTRA="--max-train-batches 20"
 # OUT=runs/aniso_2ep gives a short check.

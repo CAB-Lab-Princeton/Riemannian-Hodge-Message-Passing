@@ -357,7 +357,7 @@ def test_diagnostics_tensor_and_resolvent_keys(tensor_param, device):
 
 def test_version_and_lazy_exports():
     import rhmp
-    assert rhmp.__version__ == "2.0.0"
+    assert rhmp.__version__ == "2.1.0"
     from rhmp import CochainComplex as CC, cg_solve, flat, hodge_decompose, load_task, sharp  # noqa: F401
     from rhmp import dec
     assert cg_solve is dec.cg_solve and sharp is dec.sharp and flat is dec.flat and hodge_decompose is dec.hodge_decompose

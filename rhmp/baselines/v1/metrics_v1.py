@@ -6,7 +6,7 @@
 """v1 metric functions (reference for ``rhmp.metrics``; ``tests/test_metrics.py`` checks agreement to 1e-6).
 
 ``compute_r2_mse_mae`` works on normalised torch tensors; ``compute_nrmse`` and ``compute_ssim_pearson`` on
-unnormalised numpy arrays, exactly as in the v1 paper tables (first 100 test samples for SSIM / Pearson).
+unnormalised numpy arrays, exactly as in the original v1 evaluation (first 100 test samples for SSIM / Pearson).
 """
 import numpy as np
 import torch  # noqa: F401  (the functions receive torch tensors / numpy arrays)

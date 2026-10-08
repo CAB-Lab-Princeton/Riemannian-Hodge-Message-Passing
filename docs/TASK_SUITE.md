@@ -1,8 +1,7 @@
 # RHMP v2 task suite — designed around what a metric-learning Hodge model should be good at
 
 This is the design document of the suite; the implemented details are in
-[TASK_SUITE_DETAILS.md](TASK_SUITE_DETAILS.md) and [ANISO_TASKS.md](ANISO_TASKS.md), and the results are in
-[../REPORT.md](../REPORT.md).
+[TASK_SUITE_DETAILS.md](TASK_SUITE_DETAILS.md) and [ANISO_TASKS.md](ANISO_TASKS.md).
 
 Principle: every field lives on the cochain degree where its physics lives (scalars on nodes, 1-forms on edges,
 2-forms on faces, densities on top cells); targets come from trusted discrete solvers (FEM/DEC sparse solves);
@@ -48,8 +47,8 @@ gauge-noise robustness.
   (500 test samples regenerated on a new mesh), which is impossible for v1 by construction.
 
 ### SCALE — T6_100K and a 1M-cell forward/backward budget
-* Time and memory of v2 (C=16, L=3) vs v1 (`bench/RESULTS_step.md`; the 100K accuracy study of the v1 paper used 30
-  epochs and 200 training samples).
+* Time and memory of v2 (C=16, L=3) vs v1 (the 100K accuracy study of the paper used 30 epochs and 200 training
+  samples).
 
 ## Extension tasks (`rhmp.tasks.suite`)
 

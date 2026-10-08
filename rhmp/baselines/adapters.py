@@ -130,6 +130,12 @@ class V1ComplexAdapter:
         self._grid_meta = K.meta.get("grid_shape")
         self._face_lengths = K.meta.get("face_lengths")
         self._cache: dict[str, Any] = {}
+        # periodic complexes (flat torus): edge vectors are minimal images and faces have unwrapped frames, both
+        # supplied by the complex (they do not follow from ``pos``)
+        self.periodic = K.meta.get("period") is not None or "edge_vectors" in K.meta
+        if self.periodic:
+            self._cache["edge_vec"] = K.edge_vectors()
+            self._face_pos = K.cell_positions(2) if self.dim >= 2 else None
 
     def __repr__(self) -> str:
         return (f"V1ComplexAdapter(dim={self.dim}, n={self.n}, cell_type={self.cell_type!r}, "
@@ -202,7 +208,7 @@ class V1ComplexAdapter:
         return self._get("dir_edges", build)
 
     def edge_vectors(self) -> Tensor:
-        """``(n1, D)`` ``pos[dst] - pos[src]``."""
+        """``(n1, D)`` ``pos[dst] - pos[src]`` (minimal images on a periodic complex, taken from the complex)."""
         return self._get("edge_vec", lambda: self.pos[self.edges[:, 1]] - self.pos[self.edges[:, 0]])
 
     def edge_lengths(self) -> Tensor:
@@ -243,7 +249,10 @@ class V1ComplexAdapter:
             Fc = self.cells[2].long()
             n2, m = Fc.shape
             L = (Fc >= 0).sum(1)
-            P = self.pos.double()[Fc.clamp_min(0)]                               # (n2, m, 2)
+            if self.periodic:                                                    # unwrapped face frames
+                P = self._face_pos.double()
+            else:
+                P = self.pos.double()[Fc.clamp_min(0)]                           # (n2, m, 2)
             nxt = (torch.arange(m, device=Fc.device)[None, :] + 1) % L[:, None]
             Pn = torch.gather(P, 1, nxt[..., None].expand(n2, m, 2))
             cross = P[..., 0] * Pn[..., 1] - Pn[..., 0] * P[..., 1]

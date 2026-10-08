@@ -1,0 +1,208 @@
+{
+ "args": {
+  "task": "T3",
+  "native": false,
+  "root": null,
+  "out": "runs/baselines/T3_legacy/mpsn_s2",
+  "device": null,
+  "epochs": 100,
+  "seed": 2,
+  "model": "mpsn",
+  "param_budget": null,
+  "model_opts": null,
+  "C": null,
+  "layers": null,
+  "metric_type": "diag",
+  "resolvent_iters": null,
+  "resolvent_grad": null,
+  "latent": null,
+  "metric_ref": null,
+  "material": null,
+  "solver_mode": false,
+  "solve_iters": null,
+  "solve_precond": null,
+  "solve_bc": null,
+  "tensor_param": null,
+  "aux_pde": 0.0,
+  "no_learn_metric": false,
+  "poly": 2,
+  "log_range": 2.0,
+  "metric_hidden": 32,
+  "scaling": "dec",
+  "tie": true,
+  "no_cross": false,
+  "gate": "norm",
+  "identity_metric": false,
+  "star": "cotan",
+  "vector_mode": null,
+  "connection_odd": null,
+  "no_connection": false,
+  "no_output_map": false,
+  "batch": null,
+  "bs_meshes": null,
+  "eval_batch": null,
+  "lr": 0.001,
+  "wd": 1e-05,
+  "eta_min": 1e-05,
+  "clip": 1.0,
+  "amp": false,
+  "compile": false,
+  "compile_backend": "inductor",
+  "ckpt_layers": false,
+  "no_tf32": false,
+  "max_samples": null,
+  "max_train_batches": null,
+  "no_fine": false,
+  "abs_scale": false,
+  "data_on": "auto",
+  "no_resume": false,
+  "force": false,
+  "check_data": false,
+  "eval_v1": null,
+  "eval_ckpt": null,
+  "v1_eval_batch": 1,
+  "quiet": false,
+  "stop_after": null
+ },
+ "model": {
+  "name": "mpsn",
+  "hidden": 40,
+  "n_layers": 4,
+  "encoder": [
+   [
+    0,
+    "node",
+    1
+   ]
+  ],
+  "f_in": 1,
+  "head": "V1EdgeReadout",
+  "target_protocol": "v1 edge protocol: target 0.5 (y_src + y_dst) on the 3465 edges, first component; edge-space metrics",
+  "params": 30601,
+  "target_params": 27284,
+  "ratio": 1.1215730831256414,
+  "match": {
+   "hidden": 40,
+   "params": 30601,
+   "target": 27284,
+   "ratio": 1.1215730831256414,
+   "within_tol": true,
+   "option": {},
+   "cached": true,
+   "matched": true
+  },
+  "rhmp_reference_config": {
+   "in_dims": {
+    "0": 1
+   },
+   "even_dims": {},
+   "connection_dims": {},
+   "C": 64,
+   "n_layers": 4,
+   "poly_order": 2,
+   "metric_hidden": 32,
+   "log_range": 2.0,
+   "tie_metrics": true,
+   "scaling": "dec",
+   "cross": true,
+   "gate": "norm",
+   "identity_metric": false,
+   "readout": "node_vector",
+   "out_dim": 1,
+   "vector_mode": "direct",
+   "checkpoint_layers": false,
+   "amp": false,
+   "connection_odd": false,
+   "lift_hidden": 64,
+   "fused": true,
+   "layers": null,
+   "resolvent_iters": 20,
+   "resolvent_grad": "implicit",
+   "metric_type": "diag",
+   "metric_reference": {},
+   "resolvent_warm_start": true,
+   "learn_metric": true,
+   "latent_dims": {},
+   "material_dims": {},
+   "lifting": "mlp",
+   "resolvent_normalize": true,
+   "solve_iters": 64,
+   "solve_tol": 1e-06,
+   "solve_bc": "dirichlet",
+   "tensor_param": "full",
+   "solve_precond": "none",
+   "readout_head": "mlp"
+  }
+ },
+ "params": 30601,
+ "data": {
+  "name": "T3",
+  "native": false,
+  "N": 10000,
+  "cells": {
+   "0": 1157,
+   "1": 3465,
+   "2": 2310
+  },
+  "inputs": {
+   "0": [
+    10000,
+    1157,
+    1
+   ]
+  },
+  "target": [
+   10000,
+   3465,
+   1
+  ],
+  "target_degree": 1,
+  "target_kind": "even",
+  "readout": "node_vector",
+  "target_readout": "even:1",
+  "output_map": null,
+  "in_dims": {
+   "0": 1
+  },
+  "even_dims": {},
+  "connection_dims": {},
+  "split": [
+   7000,
+   1500,
+   1500
+  ],
+  "spatial_dim": 3,
+  "x_stats": {
+   "0": {
+    "mean": [
+     0.013750080950558186
+    ],
+    "std": [
+     1.5622953176498413
+    ],
+    "kind": "v1"
+   }
+  },
+  "y_stats": {
+   "mean": [
+    0.008131682872772217
+   ],
+   "std": [
+    2.975107192993164
+   ],
+   "kind": "v1"
+  },
+  "extra_tests": [],
+  "meta": {
+   "v1_C": 64,
+   "batch_size": 64,
+   "layers": 4,
+   "v1_name": "T3_ellipsoid_surface_flow",
+   "vector_mode": "direct",
+   "v1_edge_protocol": "v1 edge protocol: target 0.5 (y_src + y_dst) on the 3465 edges, first component; edge-space metrics"
+  }
+ },
+ "load_seconds": 7.5523741245269775,
+ "metric_reference_raw": true,
+ "raw_input_columns": {}
+}

@@ -161,7 +161,7 @@ def mesh_mixed_polygons(nx: int = 7, ny: int = 5):
         if used[q]:
             continue
         a, b, c, d = quads[q]
-        # hexagon: merge with the right neighbour (interior rows only, so that the straight-angle vertices keep
+        # hexagon: joined with the right neighbour (interior rows only, so that the straight-angle vertices keep
         # a third, non-collinear edge; a valence-2 boundary vertex would make per-vertex vector fits rank-1)
         if j[q] % 3 == 1 and 0 < j[q] < ny - 2 and i[q] % 2 == 0 and i[q] + 1 < nx - 1:
             r = q + (ny - 1)

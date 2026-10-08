@@ -6,7 +6,11 @@
   ``M_f = b_f G0_f + sum_j a_fj Gk_fj`` (precomputed PSD blocks ``K.whitney[k]``); ``H_k = sum_f P_f^T M_f P_f``.
 * Solvers: :func:`cg_solve` (batched CG on ``(n, B, C)``, per-sample Frobenius inner products -> O(C)-equivariant,
   unrolled autograd) and :func:`cg_solve_implicit` (adjoint-solve gradients).
-* Metric Hodge Laplacians and decomposition: :func:`hodge_laplacian`, :func:`hodge_decompose`, :func:`harmonic_basis`.
+* Metric Hodge Laplacians and decomposition: :func:`hodge_laplacian`, :func:`hodge_decompose`, :func:`harmonic_basis`;
+  closed generators of the first cohomology of planar domains with holes: :func:`cohomology_generators`, and their
+  harmonic representatives :func:`harmonic_generators`.
+* Galerkin energies of 1-cochains: :func:`whitney_energy` (per top cell) and :func:`vertex_energy` (density at the
+  vertices), exact for the cochains of constant fields.
 * Whitney interpolation: :func:`sharp` (1-cochain -> vector field) and :func:`flat` (vector field -> 1-cochain).
 
 Metric arguments ``H`` (Laplacians / decomposition) are indexed by degree (list, tuple or dict); an entry is a
@@ -34,6 +38,13 @@ __all__ = [
     "hodge_laplacian",
     "hodge_decompose",
     "harmonic_basis",
+    "cohomology_generators",
+    "harmonic_generators",
+    "top_measure",
+    "top_aspect",
+    "ASPECT_CAP",
+    "whitney_energy",
+    "vertex_energy",
     "sharp",
     "flat",
 ]
@@ -459,6 +470,214 @@ def harmonic_basis(K, k: int, H=None, n_probe: int = 8, iters: int = 2000, tol: 
     return Y @ (evecs[:, keep] / evals[keep].clamp_min(_TINY).sqrt())
 
 
+@torch.no_grad()
+def cohomology_generators(K) -> Tensor:
+    """Closed 1-cochains that generate the first cohomology of a planar 2-complex with holes (an oriented surface of
+    genus 0 with boundary): ``(n1, r)`` float32 with entries in ``{-1, 0, 1}``, ``r`` = number of boundary loops - 1.
+
+    For every boundary loop except the longest one (the outer boundary of a planar domain) a shortest chain of faces
+    to the outer loop is found by a breadth-first search in the dual graph; the generator is the crossing cochain of
+    that chain, +-1 on the edges it crosses (signs from the face orientations) and 0 elsewhere.  It is exactly closed
+    (``d1 c = 0`` in integer arithmetic) and sums to +-1 around its loop, so it is not exact; the ``r`` cochains are a
+    basis of ``H^1`` (the first Betti number of a genus-0 surface with ``r + 1`` boundary loops).  Any metric-harmonic
+    representative follows by a projection (``c - d0 (d0^T H d0)^+ d0^T H c``).  The sign of a generator and the chain
+    depend on the cell numbering; the cohomology class does not, up to that sign.
+
+    Args:
+        K: a single 2-complex with consistently oriented faces (``meta['face_edges']``).
+    Returns:
+        ``(n1, r)`` on the device of ``K`` (``r = 0`` for a disk or a closed surface).
+    Raises:
+        ValueError: for batches, non-manifold edges, inconsistent face orientations or disconnected domains.
+    """
+    import numpy as np
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import connected_components, dijkstra
+    if K.dim != 2 or K.num_graphs != 1 or "face_edges" not in K.meta:
+        raise ValueError("cohomology_generators expects a single 2-complex with meta['face_edges']")
+    fe = K.meta["face_edges"].cpu().numpy()
+    fs = K.meta["face_edge_signs"].cpu().numpy()
+    n0, n1, n2 = K.n
+    valid = fe >= 0
+    f_idx = np.broadcast_to(np.arange(n2)[:, None], fe.shape)[valid]
+    e_idx, s_val = fe[valid], fs[valid]
+    cnt = np.bincount(e_idx, minlength=n1)
+    if (cnt > 2).any():
+        raise ValueError("cohomology_generators: non-manifold edges")
+    order = np.argsort(e_idx, kind="stable")
+    f_sorted = f_idx[order]
+    start = np.searchsorted(e_idx[order], np.arange(n1))
+    be = np.where(cnt == 1)[0]
+    empty = torch.zeros(n1, 0, dtype=torch.float32, device=K.device)
+    if len(be) == 0:
+        return empty
+    E = K.cells[1].cpu().numpy()
+    _, lab = connected_components(csr_matrix((np.ones(len(be)), (E[be, 0], E[be, 1])), shape=(n0, n0)),
+                                  directed=False)
+    loop_of = lab[E[be, 0]]
+    loops = np.unique(loop_of)
+    if len(loops) <= 1:
+        return empty
+    length = np.linalg.norm(K.edge_vectors().double().cpu().numpy(), axis=1)
+    per = np.array([length[be[loop_of == lp]].sum() for lp in loops])
+    outer = loops[int(np.argmax(per))]
+    inner = np.where(cnt == 2)[0]
+    f1, f2 = f_sorted[start[inner]], f_sorted[start[inner] + 1]
+    dual = csr_matrix((np.ones(len(inner)), (f1, f2)), shape=(n2, n2))
+    edge_of = {}
+    for a, b, e in zip(f1.tolist(), f2.tolist(), inner.tolist()):
+        edge_of[(a, b)] = e
+        edge_of[(b, a)] = e
+
+    def sgn(f: int, e: int) -> float:
+        return float(fs[f][fe[f] == e][0])
+
+    def loop_edge(f: int, lp) -> int:
+        cand = [int(e) for e in fe[f] if e >= 0 and cnt[e] == 1 and lab[E[e, 0]] == lp]
+        return cand[0]
+
+    f_be = f_sorted[start[be]]                                   # the face of every boundary edge
+    targets = np.unique(f_be[loop_of == outer])
+    gens = []
+    for lp in loops:
+        if lp == outer:
+            continue
+        src = np.unique(f_be[loop_of == lp])
+        dist, pred, _ = dijkstra(dual, directed=False, indices=src, unweighted=True, min_only=True,
+                                 return_predecessors=True)
+        t = int(targets[np.argmin(dist[targets])])
+        if not np.isfinite(dist[t]):
+            raise ValueError("cohomology_generators: a boundary loop is not connected to the outer loop")
+        path = [t]
+        while pred[path[-1]] >= 0:
+            path.append(int(pred[path[-1]]))
+        path = path[::-1]                                         # from a face at the loop to a face at the outer loop
+        c = np.zeros(n1, dtype=np.float32)
+        e0 = loop_edge(path[0], lp)
+        c[e0] = -sgn(path[0], e0)
+        for a, b in zip(path[:-1], path[1:]):
+            e = edge_of[(a, b)]
+            c[e] = sgn(a, e)
+        e1 = loop_edge(path[-1], outer)
+        c[e1] = sgn(path[-1], e1)
+        gens.append(c)
+    out = torch.as_tensor(np.stack(gens, 1), device=K.device)
+    if float(K.apply_d(1, out.to(K.d[1].dtype)).abs().max()) != 0.0:
+        raise ValueError("cohomology_generators: the faces are not consistently oriented")
+    return out
+
+
+@torch.no_grad()
+def harmonic_generators(K, H: Tensor | None = None, dtype: torch.dtype = torch.float32) -> Tensor:
+    """Harmonic representatives of :func:`cohomology_generators`: ``gamma = c - d0 psi`` with
+    ``(d0^T H d0) psi = d0^T H c`` on all vertices (natural condition on every boundary), so that ``gamma`` is closed
+    (to round-off), co-closed (``d0^T H gamma = 0``: no flux through any boundary) and keeps the period +-1 of ``c``
+    around its hole: the circulation fields of the domain.  Sparse direct solves in float64 on the CPU.
+
+    Args:
+        K: a single planar 2-complex (see :func:`cohomology_generators`).
+        H: diagonal edge metric ``(n1,)`` (default: the reference star ``K.star[1]``).
+        dtype: dtype of the result.
+    Returns:
+        ``(n1, r)`` on the device of ``K``.
+    """
+    import numpy as np
+    from scipy.sparse import csr_matrix, diags
+    from scipy.sparse.linalg import splu
+    c = cohomology_generators(K)
+    if c.shape[1] == 0:
+        return c.to(dtype)
+    n0, n1 = K.n[0], K.n[1]
+    E = K.cells[1].cpu().numpy()
+    h = (K.star[1] if H is None else H).double().cpu().numpy()
+    d0 = csr_matrix((np.concatenate([-np.ones(n1), np.ones(n1)]),
+                     (np.concatenate([np.arange(n1)] * 2), np.concatenate([E[:, 0], E[:, 1]]))), shape=(n1, n0))
+    A = (d0.T @ diags(h) @ d0).tocsc()
+    keep = np.arange(1, n0)                                  # pin one vertex: the potential is defined up to a constant
+    lu = splu(A[keep][:, keep])
+    cn = c.double().cpu().numpy()
+    psi = np.zeros((n0, cn.shape[1]))
+    psi[keep] = lu.solve((d0.T @ (h[:, None] * cn))[keep])
+    return torch.as_tensor(cn - d0 @ psi, dtype=dtype, device=K.device)
+
+
+def top_measure(K) -> Tensor:
+    """Areas (triangle complexes) or volumes (tetrahedral complexes) of the top cells, ``(n_top,)`` float64 (cells of a
+    periodic complex in their own unwrapped frames)."""
+    d = int(K.dim)
+    V = K.cell_positions(d)[:, :d + 1].to(torch.float64)
+    if d == 2:                                                  # closed form (no batched factorisation on the GPU)
+        e1, e2 = V[:, 1] - V[:, 0], V[:, 2] - V[:, 0]
+        g = (e1 * e1).sum(-1) * (e2 * e2).sum(-1) - (e1 * e2).sum(-1).square()
+        return 0.5 * g.clamp_min(0).sqrt()
+    return _simplex_measure(V)
+
+
+def whitney_energy(K, a: Tensor, b: Tensor | None = None) -> Tensor:
+    """``int_f <a, b>`` of the Whitney interpolants of two 1-cochains on every top cell, ``e_f = a_f^T G0_f b_f`` with
+    the Galerkin mass blocks of ``K.whitney[1]`` (the reference metric ``H_1`` of the tensor-metric path).
+
+    Symmetric, positive for ``b = a``, exact for the cochains of constant fields (``e_f = |f| u . v`` for
+    ``a_e = u . (x_dst - x_src)``, ``b_e = v . (x_dst - x_src)``), invariant under edge orientation flips (both cochains
+    change sign), relabelling and E(n).
+
+    Args:
+        K: triangle or tetrahedral complex with ``K.whitney[1]``; a, b: ``(n1, *tail)`` (``b = None``: ``b = a``).
+    Returns:
+        ``(n_top, *tail)``.
+    """
+    W = _whitney(K, 1)
+    af = a[W["cells"]]                                                    # (n_top, m, *tail)
+    bf = af if b is None else b[W["cells"]]
+    G = W["G0"].to(af.dtype)
+    Gb = (G.view(G.shape + (1,) * (af.dim() - 2)) * bf.unsqueeze(1)).sum(2)
+    return (af * Gb).sum(1)
+
+
+# Cells with an aspect ratio l_max^d / (d! |f|) above this value are down-weighted by (ASPECT_CAP / aspect)^2 in the
+# vertex average of :func:`vertex_energy`: the Galerkin block of a sliver amplifies the non-closed part of a cochain by
+# the squared aspect ratio.  Equilateral triangles have 1.15, regular tetrahedra 1.41.
+ASPECT_CAP = 32.0
+
+
+def top_aspect(K) -> Tensor:
+    """Aspect ratio ``l_max^d / (d! |f|)`` of the top cells (``l_max`` the longest edge), ``(n_top,)`` float64."""
+    d = int(K.dim)
+    V = K.cell_positions(d)[:, :d + 1].to(torch.float64)
+    lmax = torch.stack([(V[:, i] - V[:, j]).norm(dim=-1) for i in range(d + 1) for j in range(i)], 1).amax(1)
+    return lmax ** d / (math.factorial(d) * top_measure(K)).clamp_min(_TINY)
+
+
+def vertex_energy(K, a: Tensor, b: Tensor | None = None, measure: Tensor | None = None,
+                  aspect_cap: float | None = ASPECT_CAP) -> Tensor:
+    """Galerkin energy density of two 1-cochains at the vertices: the :func:`whitney_energy` of the top cells around
+    vertex ``i`` divided by their measure, ``q_i = sum_{f ∋ i} w_f a_f^T G0_f b_f / sum_{f ∋ i} w_f |f|``.
+
+    The pointwise inner product ``u . v`` for the cochains of constant fields on any simplicial mesh (the lumped
+    formula ``sum_{e ∋ i} star1_e a_e b_e / (2 star0_i)`` is not, on graded meshes).  ``w_f = 1`` for cells with an
+    aspect ratio (:func:`top_aspect`) up to ``aspect_cap`` and ``(aspect_cap / aspect)^2`` beyond (slivers of
+    Delaunay triangulations of random points; still exact for constant fields; ``None``: no weighting).
+
+    Args:
+        K: triangle or tetrahedral complex; a, b: ``(n1, *tail)``; measure: :func:`top_measure` if already known.
+        aspect_cap: see above (default :data:`ASPECT_CAP`).
+    Returns:
+        ``(n0, *tail)``.
+    """
+    e = whitney_energy(K, a, b)
+    d1 = int(K.dim) + 1
+    T = K.cells[K.dim][:, :d1].long().reshape(-1)
+    m = (top_measure(K) if measure is None else measure).to(e.dtype)
+    if aspect_cap is not None:
+        w = (float(aspect_cap) / top_aspect(K)).clamp(max=1.0).square().to(e.dtype)
+        if bool((w < 1).any()):
+            e, m = e * w.view((-1,) + (1,) * (e.dim() - 1)), m * w
+    num = torch.zeros((K.n[0],) + tuple(e.shape[1:]), dtype=e.dtype, device=e.device)
+    num = num.index_add(0, T, e.repeat_interleave(d1, 0))
+    den = torch.zeros(K.n[0], dtype=e.dtype, device=e.device).index_add_(0, T, m.repeat_interleave(d1))
+    return num / den.clamp_min(_TINY).view((-1,) + (1,) * (e.dim() - 1))
+
+
 # ----------------------------------------------------------------------------------------------
 # Whitney interpolation (sharp) and de Rham map (flat)
 # ----------------------------------------------------------------------------------------------
@@ -466,7 +685,7 @@ def _whitney_frame(K):
     """Top cells, barycentric gradients (float64), measures and the local edge pairs of ``K.whitney[1]``."""
     W = _whitney(K, 1)
     T = K.cells[K.dim]
-    V = K.pos.to(torch.float64)[T]
+    V = K.cell_positions(K.dim).to(torch.float64)           # pos[T]; unwrapped frames on a periodic complex
     pairs = torch.tensor(_TRI_SLOTS if K.dim == 2 else _TET_EDGES, device=T.device)
     return W, T, barycentric_gradients(V), _simplex_measure(V), pairs
 

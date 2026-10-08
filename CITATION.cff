@@ -2,10 +2,10 @@ cff-version: 1.2.0
 message: "If you use RHMP v2 (the rhmp package), please cite the paper below."
 title: "RHMP v2: Riemannian Hodge message passing with learned DEC/Whitney metrics"
 type: software
-version: 2.0.0
+version: 2.1.0
 authors:
   - family-names: Zheng
-    given-names: Denzel
+    given-names: Dongzhe
   - family-names: Allen-Blanchette
     given-names: Christine
 keywords:
@@ -19,7 +19,7 @@ preferred-citation:
   title: "Learning Discrete Riemannian Metrics for Physical Fields with Cochain-Frame Equivariance"
   authors:
     - family-names: Zheng
-      given-names: Denzel
+      given-names: Dongzhe
     - family-names: Allen-Blanchette
       given-names: Christine
   year: 2026

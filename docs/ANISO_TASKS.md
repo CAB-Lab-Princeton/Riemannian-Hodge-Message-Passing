@@ -323,8 +323,8 @@ over many runs with `--scan DIR ... --table FILE`):
   tensor sets (`HP_k100_aniso<R>`) also the log-ratio correlation and the principal-direction error against the
   stored true tensors.  For the AHP / ASURF tasks the face comparison uses the stored face column `log det Sigma`
   itself, so a perfect recovery there has slope 0.5 (correlations are unaffected).
-* Principal directions of learned vs true tensors on one mesh are drawn by `scripts/make_figures.py` (figure 4,
-  `docs/figures/fig4_tensor_ellipses.png`).
+* Principal directions of learned vs true tensors on one mesh can be drawn from `RHMP.metric_fields`
+  (`examples/06_metric_inspection.py` shows how to read the learned tensors out of a model).
 
 **Identifiability caveat** (THEORY.md §2): only the action of a metric is identifiable. `d0ᵀH_1d0` has one weight
 per edge but a triangle tensor has three entries (the per-face tensors have a ~3 n0-dimensional kernel), and the
@@ -361,8 +361,8 @@ Presets:
 Exact commands:
 
 ```
-GPU=1 NAME=aniso tools/run_bg.sh bash scripts/run_aniso.sh                     # core preset, runs/anisotropy/
-PRESET=full GPU=1 NAME=aniso_full tools/run_bg.sh bash scripts/run_aniso.sh     # everything
+bash scripts/run_aniso.sh                                                    # core preset, runs/anisotropy/
+PRESET=full bash scripts/run_aniso.sh                                        # everything
 TASKS="AHP_r100 AHP_r10" VARIANTS="diag-solver+ref tensor-solver+ref" MODELS="" bash scripts/run_aniso.sh
 EXTRA="--abs-scale" TASKS="ACURLb_r100_n1500" bash scripts/run_aniso.sh      # absolute mesh scale (ACURL)
 python3 scripts/metric_recovery.py runs/anisotropy/AHP_r100_tensor+ref_s42 --n 32

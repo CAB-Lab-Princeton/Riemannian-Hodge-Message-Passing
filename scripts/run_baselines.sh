@@ -9,7 +9,6 @@
 #
 #   bash scripts/run_baselines.sh T6                                  # all registered models
 #   EPOCHS=2 OUT=runs/baselines_2ep bash scripts/run_baselines.sh HP_k100 mgn egnn gat dec_fixed    # short 2-epoch runs
-#   HOST=<ssh host> NAME=bl_t6 tools/run_bg.sh bash scripts/run_baselines.sh T6       # detached on a remote host
 #
 # Environment:
 #   MODE    auto (default: legacy v1 inputs for node-input baselines on T1/T3/T5/T6/T7/T6_100K, native otherwise;

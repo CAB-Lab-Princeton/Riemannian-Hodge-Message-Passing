@@ -477,7 +477,7 @@ class TaskData:
         native: native-cochain (True) or v1-legacy (False) inputs/outputs.
         meta: task defaults and diagnostics: ``v1_C``, ``batch_size``, ``readout``, ``vector_mode``,
             ``r2_std`` (v1 per-feature target std for a v1-comparable R2), ``paper_eval`` (indices of the 100 test
-            samples used by the v1 paper tables), ``consistency`` checks, ...
+            samples of the paper tables, ``test100``), ``consistency`` checks, ...
         extra_tests: additional evaluation sets normalised with the same statistics, e.g.
             ``{'fine': {'K': [...], 'inputs': [...], 'target': [...]}}`` (zero-shot resolution transfer).
         output_map: optional :class:`OutputMap` applied to the model output before the loss/metrics; ``None``

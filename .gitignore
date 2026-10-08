@@ -2,7 +2,7 @@
 /datasets/*.pkl
 /datasets/v2/
 *.pt
-!/results/checkpoints/*/best.pt
+!/results/*/*/best.pt
 *.tar.gz
 
 # run outputs and local checkpoints

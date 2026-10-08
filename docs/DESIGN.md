@@ -1,8 +1,9 @@
 # RHMP v2 — engineering redesign of Riemannian Hodge Message Passing
 
 This document is the design specification of the `rhmp/` package (v2).  [MATH.md](MATH.md) describes the
-mathematics as implemented, with the tests of every guarantee, and [../REPORT.md](../REPORT.md) reports the
-results.  The original implementation (v1) is vendored in `rhmp/baselines/v1/` for comparison.
+mathematics as implemented, with the tests of every guarantee; the results of the paper are in
+[../results/RESULTS.md](../results/RESULTS.md).  The original implementation (v1) is vendored in
+`rhmp/baselines/v1/` for comparison.
 
 Paper: "Learning Discrete Riemannian Metrics for Physical Fields with Cochain-Frame Equivariance"
 (Zheng & Allen-Blanchette, arXiv:2608.14556). v1 code: https://github.com/ContinuumCoder/Riemannian-Hodge-Message-Passing
@@ -21,7 +22,7 @@ The redesign keeps the following exactly:
 4. **E(n)**: all geometric inputs are E(n)-invariant; scalar readouts are invariant, vector readouts equivariant.
 5. **Abelian gauge invariance** `F = d_1 A` from `d_1 d_0 = 0`.
 
-Fixes (v1 defects found by inspection and measurement; see `bench/v1_timing.py`):
+Fixes (v1 defects found by inspection and measurement):
 
 | # | v1 defect | v2 fix |
 |---|-----------|--------|
@@ -35,7 +36,7 @@ Fixes (v1 defects found by inspection and measurement; see `bench/v1_timing.py`)
 | F8 | COO spmm with `.t()`/`.coalesce()` per call, geometry recomputed per forward, `(B,n,C)` permute copies, Python loop in vector readout, per-sample loop for variable meshes, no AMP/TF32 | CSR `d`, `d^T`, `|d|` precomputed; `(n, B, C)` layout (zero-copy spmm view); cached geometry; vectorised readouts; block-diagonal mesh batching; AMP for dense parts, fp32 spmm; optional `torch.compile`, activation checkpointing |
 | F9 | Only triangle meshes, degrees 0..2 | general cochain complexes: triangles, quads/polygons (CW), tetrahedra (degrees 0..3), grids, batches |
 
-v1 reference numbers (RTX PRO 6000 Blackwell, `bench/v1_timing.py`): on T6 (n0=1024, C=128, L=4, B=64) a training
+v1 reference numbers (RTX PRO 6000 Blackwell): on T6 (n0=1024, C=128, L=4, B=64) a training
 step takes 104.6 ms and inference 51.0 ms, with 7.17 GB peak memory and 0.43M parameters; on T7 (C=160) a step takes
 141.4 ms with 8.89 GB; on T6_100K (C=16, L=3, B=2) a step takes 25.9 ms and building the complex takes 6.5 s.
 
@@ -62,9 +63,8 @@ rhmp/
                      anisotropy suites
   baselines/         registry, MeshGraphNet, v2 controls, vectorised cores around the vendored v1 code (baselines/v1)
 tests/               pytest suite
-bench/               ops_bench.py, step_bench.py, batch_bench.py, v1_timing.py
 datasets/generators/ generators for new tasks (outputs go to datasets/v2/*.pt, git-ignored)
-tools/sync.sh, tools/remote.sh, tools/run_bg.sh   (remote workflow, see §8)
+scripts/             training launchers, evaluation and result-collection scripts (see ../README.md)
 ```
 
 ## 2. Conventions
@@ -293,15 +293,10 @@ The test suite covers three groups:
   evaluation code (`rhmp.baselines.v1.metrics_v1`, 1e-6 on random data); block-diagonal batch training == per-sample
   loop loss (same parameters, 1e-5).
 
-## 6. Benchmarks and experiments (one GPU per job)
-* `bench/ops_bench.py`: CSR spmm vs COO vs gather/scatter for `d0`, `d1`, `d0^T`, `d1^T` at n0 in {1K, 10K, 100K},
-  `B*C` in {128, 8192}; report best per size; `spmm` may dispatch on size if a clear winner exists.
-* `bench/step_bench.py`: v1 vs v2 train-step time / inference time / peak memory on T6 (C=128,L=4,B=64), T7, T6_100K
-  (C=16,L=3,B=2), and a synthetic 1M-cell Delaunay mesh forward (C=16); with/without AMP, compile, checkpointing.
-* `bench/batch_bench.py`: T8-like variable meshes, per-sample loop vs block-diagonal batches of 4/8/16.
+## 6. Experiments (one GPU per job)
 * Accuracy: v2 on T1,T2,T3,T5,T6,T7,T8 with the v1 protocol (100 epochs, seed 42, Adam 1e-3 cosine
   to 1e-5, wd 1e-5, batch 64, clip 1.0, sequential 70/15/15 split, same metrics) in both `native` and `legacy` input
-  modes; compare to the v1 paper tables. New tasks: hetero/anisotropic-conductivity Poisson on random variable Delaunay meshes
+  modes. New tasks: hetero/anisotropic-conductivity Poisson on random variable Delaunay meshes
   (train 1-2K nodes, test also at 4x resolution = zero-shot resolution transfer), 3-D tetrahedral Poisson, quad-grid T1.
   Metric interpretability: correlation of learned `log(H_1/star_1)` with true `log sigma` on hetero-Poisson.
 * Robustness sweeps: vertex relabelling, edge-orientation convention, E(n) transforms, batch composition, sliver
@@ -313,14 +308,7 @@ The test suite covers three groups:
 * `torch.no_grad()` for geometry; everything cached on the complex. The model must not allocate `n_k`-sized parameters.
 * Log-domain for all scale features. Clamp and `eps` values are named constants with comments.
 
-## 8. Remote workflow
-Code can be edited on a laptop and executed on a GPU machine (`HOST`, checkout `~/$REMOTE_DIR`, see `tools/ssh_opts.sh`):
-```
-HOST=gpu tools/sync.sh                                   # push the local tree (additive rsync; data and runs excluded)
-HOST=gpu tools/remote.sh 'python3 -m pytest tests -q'    # run a command there (GPU=1 selects another GPU)
-HOST=gpu NAME=t6_v2 tools/run_bg.sh python3 -u -m rhmp.train --task T6 ...   # background job, log in runs/logs/
-HOST=gpu tools/fetch.sh                                  # pull result files (json / md / png) back
-```
+## 8. Data
 The datasets are `datasets/*.pkl` and `datasets/v2/*.pt` (formats in `docs/DATASETS.md`, sources in
 `datasets/README.md`); the v1 checkpoints are in `checkpoints_v1/` (`python3 datasets/download_v1.py --ckpt`).
 
@@ -385,3 +373,19 @@ Reference stars (diag + Whitney/Galerkin), Laplacians `Δ_k` for any metric, Hod
 (exact / coexact / harmonic) via the same CG solver, harmonic basis (inverse iteration), Whitney interpolation
 (cochain → vector field at vertices/faces, "sharp") and its adjoint ("flat", vector field → cochain), all batched,
 metric-aware and differentiable. They are library features for general use, and the tests and the readouts use them.
+
+### 9.4 Fixed-point (Picard) solve with a state-dependent metric (`solve_picard=J`; default 0)
+For nonlinear constitutive laws (e.g. saturable magnetic materials, `nu(|B|)`), the vertex solve of a `'solve'` layer
+can be iterated with a metric that depends on the current iterate: `y_0 = 0`; for `j = 1..J` the vertex-block metric
+`H_1^(j)` (diagonal edge head or Whitney tensor head) is predicted from the usual descriptors plus the field-energy
+invariant `e_f = (1/C) sum_c (d_0 y_c)_f^T G_f (d_0 y_c)_f / |f|` of `y_{j-1}` (`G_f` = unit-tensor Galerkin block, so
+`e_f` is the mean channel `|grad y|^2`; fed as `0.5 log(1 + e/e_0)` with a learnable `e_0`, and as its incident-cell
+mean on edges), and `y_j = y_{j-1} + omega (S(H^(j)) x - y_{j-1})` (`y_1 = S(H^(1)) x`), with the layer input `x` as
+right-hand side every time, weight-tied heads and a learnable `omega = sigmoid(.)` (init `picard_relax`).  Each solve
+is the physical solve of §9.2 (implicit adjoint gradients, warm start from the previous iterate).  The invariant is
+O(C)-, E(n)-, orientation- and relabelling-invariant and per sample, so every guarantee of the layer is kept; with a
+frozen metric every iterate equals the single solve.  Picard layers need `K.whitney[1]` also with diagonal metrics.
+`picard_init='learned'` (default `'zero'`) starts the first iteration from a learnable uniform invariant
+`f_0 = softplus(.)` instead of `y_0 = 0`: a starting operating point, so that the zero-field part of the learned law
+does not also have to serve as the initial guess of strongly saturated states (one extra scalar; the guarantees are
+unchanged).

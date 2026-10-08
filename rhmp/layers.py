@@ -24,6 +24,7 @@ Notation (per degree ``k``, all feature tensors ``(n_k, B, C)``, per-cell/per-sa
 Layer update (all degrees synchronously from the layer input)::
 
     m_k = sum_p c^up_p L_up^p x_k + sum_p c^dn_p L_dn^p x_k + w_cu T_up x_{k+1} + w_cd T_dn x_{k-1}
+          (+ the transport term sum_p g_p T^p x_0 on the vertices when configured, ``rhmp.transport``)
     x_k <- x_k + gamma_k * sigmoid(MLP(log1p(rms(m_k)))) * m_k / rms(m_k)      (radial norm gate)
 
 Implementation notes (performance):
@@ -56,18 +57,23 @@ __all__ = [
     "LayerContext", "BlockGeometry", "make_context", "RadialGate", "RHMPLayer", "BlockOperands", "block_operands",
     "apply_L", "apply_T", "poly_block", "poly_block_reference", "spmm_ad", "SharedCoboundaries", "mean_square",
     "residual_scale", "row_linear", "linear", "mlp2", "resolvent_matvec", "resolvent_apply", "TAU_MAX",
-    "TensorOperands", "tensor_operands", "apply_L_tensor", "apply_T_tensor", "block_beta_unit",
+    "TensorOperands", "tensor_operands", "apply_L_tensor", "apply_T_tensor", "block_beta_unit", "unit_reference",
     "PhysicalHodge", "physical_hodge", "physical_solve", "dirichlet_free", "dyad_gram_inverse", "TensorMetric",
-    "galerkin_geometry", "galerkin_blocks",
+    "galerkin_geometry", "galerkin_blocks", "TermGate", "metric_projection", "KuttaHead", "reference_energy",
+    "direct_projection", "dense_projection",
+    "direct_projection", "boundary_corner",
 ]
 
 # Floor added to the per-cell mean square of a message inside the radial gate normaliser (features are O(1)).
 RMS_EPS = 1e-6
+# Relative floor of the scale-invariant invariants of the homogeneous and per-term gates: mean squares are floored at
+# HOMOG_EPS * (|x|^2 + |m|^2) / C of the same cell (exactly scale invariant), plus an absolute 1e-30 against 0 / 0.
+HOMOG_EPS = 1e-6
 # |log H| is clamped to this value after adding the (normalised) reference star: keeps exp(.) finite in fp32
 # even for absurd ``log_range`` values; never active for the default a = 2.
 LOG_H_MAX = 60.0
 _SCALINGS = ("dec", "jacobi", "none")
-_GATES = ("norm", "relu", "none")
+_GATES = ("norm", "relu", "none", "homog")
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -306,13 +312,23 @@ def _csr_scale_rows(A: Tensor, s: Tensor) -> Tensor:
 
 
 @torch.no_grad()
-def _complex_operators(K: Any, scaling: str, dtype: torch.dtype) -> dict:
-    """Geometry-only tensors of a complex for one scaling: normalised log-stars and all block operators."""
+def _complex_operators(K: Any, scaling: str, dtype: torch.dtype, frozen: dict | None = None) -> dict:
+    """Geometry-only tensors of a complex for one scaling: normalised log-stars and all block operators.
+
+    ``frozen`` (``RHMPConfig.frozen_units``, see :func:`unit_reference`): the per-mesh normalisers of the training
+    mesh instead of this complex's own: the stars are divided by the training geometric means, the relative
+    descriptors re-expressed against the training medians, and ``beta_scale[(k, up)] = beta_unit(train) /
+    beta_unit(this mesh)`` (unit-metric Gershgorin bounds of the scaled blocks, per graph) rescales the block bounds.
+    With ``frozen['geo_log_median'] = None`` (``RHMPConfig.frozen_descriptors=False``) the descriptors keep this
+    complex's own medians and only the stars and bounds use the training units; with ``frozen['geo_range']``
+    (``'auto'``: per degree ``(min, max)`` of the training descriptors) a relative column is re-expressed only if this
+    complex's median of it in training units (``log median - log median_train``) lies in ``[min, max]``.
+    """
     try:
         store = _OP_CACHE.setdefault(K, {})
     except TypeError:  # not weak-referenceable: no caching
         store = {}
-    key = (scaling, dtype, str(K.pos.device))
+    key = (scaling, dtype, str(K.pos.device), None if frozen is None else frozen["key"])
     if key in store:
         return store[key]
     top = int(K.dim)
@@ -321,7 +337,10 @@ def _complex_operators(K: Any, scaling: str, dtype: torch.dtype) -> dict:
     log_star, log_gm = [], []
     for k in range(top + 1):
         ls = torch.log(K.star[k].to(dtype))
-        if batch is None:
+        if frozen is not None:                                             # one unit for every mesh: the training one
+            gm = frozen["log_gm"][k].to(device=ls.device, dtype=dtype).reshape(1).expand(G).contiguous()
+            ls = ls - gm[0]
+        elif batch is None:
             gm = ls.mean().reshape(1)                                      # (1,) log geometric mean of the star
             ls = ls - gm
         else:
@@ -353,10 +372,58 @@ def _complex_operators(K: Any, scaling: str, dtype: torch.dtype) -> dict:
     bcount = [None] + [ops.spmm(K.d_abs[k - 1], torch.ones(K.n[k - 1], 1, 1, dtype=dtype,
                                                           device=log_star[0].device)).clamp_min(1.0)
                        for k in range(1, top + 1)]
-    out = dict(log_star=log_star, log_gm=log_gm, log_vol=torch.log(vol), blocks=blocks, bcount=bcount,
-               geo=[g if g.dtype == dtype else g.to(dtype) for g in K.geo])
+    geo = [g if g.dtype == dtype else g.to(dtype) for g in K.geo]
+    beta_scale = None
+    if frozen is not None and frozen.get("geo_log_median") is not None:   # descriptors in training units
+        lm = K.meta.get("geo_log_median")
+        if lm is None:
+            raise ValueError("frozen_units: the complex carries no meta['geo_log_median'] (built by an older version)")
+        from .geometry import GEO_RELATIVE_COLUMNS
+        for k in range(top + 1):
+            cols = list(GEO_RELATIVE_COLUMNS[k])
+            ref = frozen["geo_log_median"][k].to(device=geo[k].device, dtype=torch.float64)          # (G_k,)
+            cur = lm[k].to(device=geo[k].device, dtype=torch.float64)                                # (G, G_k)
+            shift = torch.zeros_like(cur)
+            shift[:, cols] = cur[:, cols] - ref[cols]
+            if frozen.get("geo_range") is not None:                       # 'auto': inside the training range only
+                lo, hi = (v.to(device=shift.device, dtype=torch.float64) for v in frozen["geo_range"][k])
+                shift = torch.where((shift >= lo) & (shift <= hi), shift, torch.zeros_like(shift))
+            shift = shift.to(dtype)
+            geo[k] = geo[k] + (shift[0] if batch is None else shift[batch[k]])
+    if frozen is not None:
+        beta_scale = {}
+        for (k, up), g in blocks.items():
+            bu = ops.beta_unit(g.A_abs, g.AT_abs, None, batch[k] if batch is not None else None, G).reshape(-1, 1)
+            ref = frozen["beta_unit"][(k, up)].to(device=bu.device, dtype=dtype)
+            beta_scale[(k, up)] = torch.where(bu > 0, ref / bu.clamp_min(torch.finfo(dtype).tiny), torch.ones_like(bu))
+    out = dict(log_star=log_star, log_gm=log_gm, log_vol=torch.log(vol), blocks=blocks, bcount=bcount, geo=geo,
+               beta_scale=beta_scale)
     store[key] = out
     return out
+
+
+@torch.no_grad()
+def unit_reference(K: Any, scaling: str, dtype: torch.dtype) -> dict:
+    """The per-mesh geometric normalisers of one complex in its own units (what ``RHMPConfig.frozen_units`` stores):
+    ``log_gm`` ``(K+1,)`` log geometric means of the reference stars, ``geo_log_median`` per degree ``(G_k,)`` (the
+    medians behind the relative descriptors, 0 for scale-free columns), ``geo_min`` / ``geo_max`` per degree ``(G_k,)``
+    (range of every descriptor column over the complex) and ``beta_unit`` ``{(k, up): ()}``, the unit-metric
+    Gershgorin bounds of the scaled block operators.
+
+    Raises:
+        ValueError: for a block-diagonal batch of several meshes or a complex without ``meta['geo_log_median']``.
+    """
+    if K.batch is not None and int(K.num_graphs) > 1:
+        raise ValueError("frozen_units: the reference must be one mesh (the training mesh), got a batch of meshes")
+    lm = K.meta.get("geo_log_median")
+    if lm is None:
+        raise ValueError("frozen_units: the complex carries no meta['geo_log_median'] (built by an older version)")
+    geom = _complex_operators(K, scaling, dtype)
+    beta = {key: ops.beta_unit(g.A_abs, g.AT_abs, None, None, 1).reshape(()) for key, g in geom["blocks"].items()}
+    geo = [K.geo[k].to(torch.float64) for k in range(int(K.dim) + 1)]
+    return dict(log_gm=torch.stack([v.reshape(()) for v in geom["log_gm"]]),
+                geo_log_median=[lm[k].reshape(-1).to(torch.float64) for k in range(int(K.dim) + 1)], beta_unit=beta,
+                geo_min=[g.amin(0) for g in geo], geo_max=[g.amax(0) for g in geo])
 
 
 def block_beta_unit(ctx: "LayerContext", k: int) -> Tensor:
@@ -396,6 +463,10 @@ class LayerContext:
         resolvent_prev: ``{k: (n_k, B, C)}`` last resolvent-layer solution per degree (warm starts), or ``None``.
         log_gm: ``log`` of the geometric mean of ``star_k`` per graph, ``(1|G,)`` (restores physical units).
         log_vol: ``log`` of the total dual measure ``sum star_0`` per graph, ``(1|G,)`` (domain scale ``L^D``).
+        beta_scale: ``{(k, up): (1|G, 1)}`` factors ``beta_unit(train) / beta_unit(mesh)`` applied to the block bounds
+            (``frozen_units``), else ``None``.
+        transport_fields: input / latent transport fields of the transport term ``(n_1, B, J)`` or ``None``
+            (``rhmp.transport``).
     """
 
     K: Any
@@ -415,6 +486,9 @@ class LayerContext:
     resolvent_prev: dict | None = None                                       # last resolvent solution per degree
     log_gm: list | None = None                                               # log geometric mean of star_k per graph
     log_vol: Tensor | None = None                                            # log total dual measure per graph
+    beta_scale: dict | None = None                                           # frozen_units: block-bound factors
+    energy_ref: Tensor | None = None                                         # (1|G, B) reference energy density
+    transport_fields: Tensor | None = None                                   # transport-field input columns (n_1, B, J)
 
     def cell_mean(self, v: Tensor, k: int) -> Tensor:
         """Per-sample mean over ``k``-cells, broadcast back to cells.
@@ -453,7 +527,7 @@ class LayerContext:
 
 
 def make_context(K: Any, *, scaling: str, B: int, dtype: torch.dtype, even: list[Tensor | None] | None = None,
-                 record: bool = False) -> LayerContext:
+                 record: bool = False, frozen: dict | None = None) -> LayerContext:
     """Build the per-forward :class:`LayerContext` (geometry only, no gradients; operators cached per complex).
 
     Args:
@@ -463,6 +537,8 @@ def make_context(K: Any, *, scaling: str, B: int, dtype: torch.dtype, even: list
         dtype: feature dtype.
         even: even raw inputs per degree (``(n_k, B, E_k)`` or ``None``), length ``K.dim + 1``.
         record: record diagnostics in the layers.
+        frozen: training-mesh normalisers (``frozen_units``; :func:`unit_reference` plus a hashable ``'key'``) or
+            ``None`` (this complex's own normalisers, the default).
 
     Returns:
         The context.
@@ -470,13 +546,14 @@ def make_context(K: Any, *, scaling: str, B: int, dtype: torch.dtype, even: list
     if scaling not in _SCALINGS:
         raise ValueError(f"scaling must be one of {_SCALINGS}, got {scaling!r}")
     top = int(K.dim)
-    geom = _complex_operators(K, scaling, dtype)
+    geom = _complex_operators(K, scaling, dtype, frozen)
     if even is None:
         even = [None] * (top + 1)
     return LayerContext(K=K, top=top, B=int(B), dtype=dtype, batch=K.batch,
                         num_graphs=int(K.num_graphs) if K.batch is not None else 1, log_star=geom["log_star"],
                         blocks=geom["blocks"], bcount=geom["bcount"], geo=geom["geo"], even=list(even),
-                        scaling=scaling, record=record, log_gm=geom["log_gm"], log_vol=geom["log_vol"])
+                        scaling=scaling, record=record, log_gm=geom["log_gm"], log_vol=geom["log_vol"],
+                        beta_scale=geom["beta_scale"])
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -532,6 +609,8 @@ def block_operands(ctx: LayerContext, k: int, up: bool, log_H: Tensor) -> BlockO
         rb = spmm_ad(g.AT_abs, g.A_abs, (H * g.r).contiguous()).squeeze(-1)  # (n_k, B) Gershgorin row bounds
         s_explicit, scale = None, g.scale
     beta = ctx.cell_max(rb, k)
+    if ctx.beta_scale is not None:                                          # frozen_units: training-mesh bound units
+        beta = beta * ctx.beta_scale[(k, up)].to(beta.dtype)
     beta = torch.where(beta > 0, beta, torch.ones_like(beta))               # empty operator -> beta := 1
     log_h = log_H - ctx.to_cells(torch.log(beta), g.nb)
     return BlockOperands(A=g.A, AT=g.AT, s=s_explicit, scale=scale, log_h=log_h, beta=beta, nb=g.nb)
@@ -647,7 +726,7 @@ def galerkin_geometry(K: Any, km: int, dtype: torch.dtype) -> dict:
     d = int(K.dim)
     Wk = K.whitney[km]
     T = K.cells[d][:, :d + 1].long()
-    V = K.pos.to(torch.float64)[T]
+    V = K.cell_positions(d)[:, :d + 1].to(torch.float64)                    # pos[T] (unwrapped frames if periodic)
     grads = geo.barycentric_gradients(V)
     meas = geo._simplex_measure(V)
     if d == 2:
@@ -809,12 +888,15 @@ def tensor_operands(ctx: LayerContext, k: int, tm: "TensorMetric") -> TensorOper
     """Operands of the up block of degree ``k`` with the tensor metric ``H_{k+1}`` (``tm``).
 
     ``rho = max_e rowsum|H|_e >= lambda_max(H)`` (per sample), ``beta_unit >= lambda_max(A^T A)``, hence
-    ``||A^T H A / (rho beta_unit)|| <= 1`` and ``||A^T H / (sqrt(beta_unit) rho)|| <= 1``.
+    ``||A^T H A / (rho beta_unit)|| <= 1`` and ``||A^T H / (sqrt(beta_unit) rho)|| <= 1``.  With ``frozen_units``
+    ``beta_unit`` is the training mesh's (``ctx.beta_scale``), as for the diagonal blocks.
     """
     km = k + 1
     g: BlockGeometry = ctx.blocks[(k, True)]
     rho = ctx.cell_max(tm.rowsum_abs(), km)                                  # (S, B)
     bu = block_beta_unit(ctx, k).to(rho.dtype)                               # (S, 1)
+    if ctx.beta_scale is not None:                                          # frozen_units: training-mesh bound units
+        bu = bu * ctx.beta_scale[(k, True)].to(bu.dtype)
     beta = rho * bu
     return TensorOperands(A=g.A, AT=g.AT, tm=tm, km=km, inv_beta=(1.0 / ctx.to_cells(beta, km)).unsqueeze(-1),
                           cross_scale=(1.0 / ctx.to_cells(torch.sqrt(bu) * rho, km)).unsqueeze(-1), beta=beta)
@@ -1043,14 +1125,15 @@ def resolvent_apply(ctx: LayerContext, k: int, x: Tensor, op_up: BlockOperands |
 # --------------------------------------------------------------------------------------------------------------
 # physical (un-normalised) metric Hodge operators and solve layers
 # --------------------------------------------------------------------------------------------------------------
-_SOLVE_BCS = ("dirichlet", "none", "neumann")
+_SOLVE_BCS = ("dirichlet", "none", "neumann", "lift")
 
 
 def dirichlet_free(ctx: LayerContext, k: int, bc: str) -> Tensor | None:
     """Mask of the free k-cells ``(n_k, 1, 1)`` (1 free, 0 fixed) or ``None`` (``bc='none'`` / ``'neumann'``).
 
     Fixed cells: ``K.meta['dirichlet'][k]`` (bool ``(n_k,)``, list or dict per degree) when the task provides it,
-    else the boundary cells ``K.boundary[k]``.
+    else the boundary cells ``K.boundary[k]``.  ``bc='lift'`` has the same fixed cells (their values are the layer
+    input, see :func:`physical_solve`).
     """
     if bc in ("none", "neumann"):
         return None
@@ -1341,7 +1424,11 @@ class _PCGImplicit(torch.autograd.Function):
         if need:
             with torch.enable_grad():
                 Ax = matvec(x.detach())
-                gp = torch.autograd.grad(Ax, [params[i] for i in need], grad_outputs=-lam, allow_unused=True)
+                # retain_graph: the operator may reuse cached differentiable blocks (TensorMetric) that the forward
+                # also used outside the solve (right-hand side, warm-start residual), whose graph the outer backward
+                # still has to traverse
+                gp = torch.autograd.grad(Ax, [params[i] for i in need], grad_outputs=-lam, allow_unused=True,
+                                         retain_graph=True)
             for i, gi in zip(need, gp):
                 grads[i] = gi
         return (lam if ctx.needs_input_grad[0] else None, None, *grads)
@@ -1356,8 +1443,8 @@ def pcg_solve_implicit(matvec: Any, rhs: Tensor, precond: Any, params: Any = (),
 
 
 def physical_solve(ctx: LayerContext, k: int, x: Tensor, op: PhysicalHodge, shift: Tensor, free: Tensor | None,
-                   iters: int, tol: float, x0: Tensor | None = None, precond: str = "none", mean_free: bool = False
-                   ) -> tuple[Tensor, Tensor, Tensor, int]:
+                   iters: int, tol: float, x0: Tensor | None = None, precond: str = "none", mean_free: bool = False,
+                   lift: bool = False) -> tuple[Tensor, Tensor, Tensor, int]:
     """``y = (Delta_H + shift)^{-1} x`` on the free cells (``x = 0`` imposed on fixed cells) by batched (P)CG with
     implicit gradients (:func:`pcg_solve_implicit`, per-sample / per-graph inner products).
 
@@ -1378,6 +1465,9 @@ def physical_solve(ctx: LayerContext, k: int, x: Tensor, op: PhysicalHodge, shif
             ``M x`` is made compatible by removing its mean per graph, sample and channel (the ``eps -> 0`` limit of
             ``(K + eps I) y = M x``, as in the T5 generator), so the solution is the zero-mean (``1^T M y = 0``)
             solution of the pure Neumann problem instead of carrying a ``1/shift``-sized constant.
+        lift: inhomogeneous Dirichlet data (``solve_bc='lift'``): the input on the fixed cells is the boundary value
+            ``g`` (``y = x`` there) and on the free cells the source, ``y_free = (K + shift M)_ff^{-1} (M x - (K + shift
+            M) g)_f``; the lift ``g`` enters through the right-hand side, so the implicit gradients stay exact.
 
     Returns:
         ``(y, y_sym, rel_res, n_iter)``: solution ``(n_k, B, C)``, its symmetric-frame form (for warm starts), the final
@@ -1408,10 +1498,14 @@ def physical_solve(ctx: LayerContext, k: int, x: Tensor, op: PhysicalHodge, shif
         return (op.apply(vp) + shift * vp) * dmf
 
     rhs = x * sh * dm
+    g = None
+    if lift and free is not None:                # boundary values in the symmetric frame, moved to the right-hand side
+        g = x * sh * (1.0 - free)
+        rhs = rhs - (op.apply(g) + shift * g) * dm
     if free is not None:
         rhs = rhs * free
     if x0 is not None:
-        x0 = x0.detach()
+        x0 = x0.detach() if g is None else x0.detach() * free              # the free part (g is added back)
         rhs = rhs - matvec(x0 / dm)
     params = op.params() + ([shift] if shift.requires_grad else [])
     batch = ctx.batch[k] if ctx.batch is not None else None
@@ -1427,6 +1521,8 @@ def physical_solve(ctx: LayerContext, k: int, x: Tensor, op: PhysicalHodge, shif
     y_sym = w * dm
     if x0 is not None:
         y_sym = x0 + y_sym
+    if g is not None:
+        y_sym = y_sym + g
     rel = res[-1].detach()
     if x0 is not None:                                                        # residual relative to |x|
         with torch.no_grad():
@@ -1444,6 +1540,260 @@ def sample_norm2(ctx: LayerContext, k: int, v: Tensor) -> Tensor:
     return n.sum(0, keepdim=True) if ctx.batch is None else ops.segment_sum(n, ctx.batch[k], ctx.num_graphs)
 
 
+def reference_energy(ctx: LayerContext) -> Tensor:
+    """Per-graph reference energy density of edge cochains ``(1|G, 1|B)``: the value set by the model
+    (``ctx.energy_ref``: the Galerkin energy density of the amplitude 1-form, ``RHMPConfig.amplitude_energy``), else the
+    energy density of a cochain of unit values under the diagonal reference star, ``sum_e star1_e / sum_i star0_i``.
+    A cochain of typical value 1 belongs to a field of magnitude ``sqrt(E_ref)`` (in inverse length units)."""
+    if ctx.energy_ref is not None:
+        return ctx.energy_ref
+    K = ctx.K
+    s1, s0 = K.star[1].to(ctx.dtype), K.star[0].to(ctx.dtype)
+    if ctx.batch is None:
+        return (s1.sum() / s0.sum()).reshape(1, 1)
+    G = ctx.num_graphs
+    return (ops.segment_sum(s1, ctx.batch[1], G) / ops.segment_sum(s0, ctx.batch[0], G)).reshape(G, 1)
+
+
+def metric_projection(ctx: LayerContext, x1: Tensor, up: tuple, free: Tensor | None, iters: int, tol: float,
+                      precond: str = "none") -> tuple[Tensor, Tensor, Tensor, int]:
+    """Potential of the metric (Hodge / Leray) projection of edge cochains.
+
+    ``alpha = argmin_a ||x1 - d0 a||_H^2`` over the vertex potentials that vanish on the fixed vertices:
+    ``(d0^T H d0) alpha = d0^T H x1`` on the free vertices, with the natural condition on the free part of the
+    boundary.  ``x1 - d0 alpha`` is the ``H``-orthogonal projection of ``x1`` onto the cochains that are co-closed on the
+    free vertices, ``d0^T H (x1 - d0 alpha) = 0`` there; for the 1-form of a uniform flow and ``H`` the reference star it
+    is the potential flow around the free boundary (no flux through it).  The result does not depend on the scale of
+    ``H``.  Linear in ``x1`` and identical for every channel (O(C)-equivariant), per sample and per graph.  Jacobi (or
+    two-level) preconditioned CG with implicit gradients (:func:`pcg_solve_implicit`).
+
+    Args:
+        ctx: context; x1: ``(n1, B, C)`` cochain values.
+        up: the metric of the degree-0 up block, ``('diag', geometry, H (n1, B, 1))`` or ``('tensor', geometry,
+            TensorMetric)`` with ``geometry = ctx.blocks[(0, True)]`` (as :class:`PhysicalHodge`).
+        free: free-vertex mask ``(n0, 1, 1)`` or ``None`` (no fixed vertices: the zero-mean potential of every graph).
+        iters, tol, precond: CG budget and preconditioner (``'none'``: Jacobi, ``'twolevel'``).
+
+    Returns:
+        ``(alpha, d0 alpha, rel_res, n_iter)``: ``(n0, B, C)``, ``(n1, B, C)``, the final relative CG residual ``(S, B)``
+        and the number of iterations run.
+    """
+    g: BlockGeometry = up[1]
+    op = PhysicalHodge(ctx, up, None)
+    Hx = up[2] * x1 if up[0] == "diag" else up[2].apply(x1.contiguous())
+    b = spmm_ad(g.AT, g.A, Hx)                                              # s d0^T H x1
+    with torch.no_grad():
+        dg = op.diagonal()
+        dm = torch.where(dg > 0, dg, torch.ones_like(dg)).rsqrt()           # (n0, B, 1) Jacobi scaling
+        dmf = dm if free is None else dm * free
+
+    def matvec(v: Tensor) -> Tensor:
+        return op.apply(v * dmf) * dmf
+
+    batch = ctx.batch[0] if ctx.batch is not None else None
+    pc = None
+    if precond == "twolevel":
+        with torch.no_grad():
+            qv = 1.0 / dm if g.scale is None else 1.0 / (dm * g.scale)       # constants of alpha in the scaled frame
+            if free is not None:
+                qv = qv * free
+            pc = two_level_preconditioner(ctx, 0, matvec, qv.expand(-1, dm.shape[1], 1).contiguous())
+    w, res = pcg_solve_implicit(matvec, (b * dmf).contiguous(), pc, params=op.params(), iters=int(iters),
+                                tol=float(tol), batch=batch, num_graphs=ctx.num_graphs, early_exit=True)
+    y = w * dmf                                                              # s^-1 alpha
+    alpha = y if g.scale is None else y * g.scale
+    if free is None:                                                         # defined up to a constant per graph
+        mu = alpha.mean(0, keepdim=True) if batch is None else \
+            ops.segment_mean(alpha.reshape(alpha.shape[0], -1), batch, ctx.num_graphs)[batch].view_as(alpha)
+        alpha = alpha - mu
+    dalpha = spmm_ad(g.A, g.AT, y)
+    with torch.no_grad():
+        n_it = int((res[1:] != res[:-1]).sum(0).max().item()) if res.shape[0] > 1 else 0
+    return alpha, dalpha, res[-1].detach(), n_it
+
+
+class _DirectProjection(torch.autograd.Function):
+    """``alpha = (d0^T H d0)_ff^-1 (d0^T H x1)_f`` per graph and sample by a sparse LU factorisation on the CPU in
+    float64 (SciPy / SuperLU), with adjoint gradients that reuse the factorisations:
+    ``d x1 = H (d0 lam)``, ``d H = sum_c (d0 lam)(x1 - d0 alpha)``, ``lam = (d0^T H d0)_ff^-1 d alpha``."""
+
+    @staticmethod
+    def forward(ctx: Any, x1: Tensor, h: Tensor, cfg: tuple) -> Tensor:  # noqa: D102
+        import numpy as np
+        from scipy.sparse import csr_matrix, diags
+        from scipy.sparse.linalg import splu
+        edges, free, ptr0, ptr1, d0, d0T = cfg
+        n1, B, C = x1.shape
+        xn = x1.detach().to("cpu", torch.float64).numpy()
+        hn = h.detach().to("cpu", torch.float64).numpy()
+        alpha = np.zeros((len(free), B, C))
+        facts = []
+        for gi in range(len(ptr0) - 1):
+            v0, v1, e0, e1 = int(ptr0[gi]), int(ptr0[gi + 1]), int(ptr1[gi]), int(ptr1[gi + 1])
+            ne, nv = e1 - e0, v1 - v0
+            ar = np.arange(ne)
+            D = csr_matrix((np.concatenate([-np.ones(ne), np.ones(ne)]),
+                            (np.concatenate([ar, ar]), np.concatenate([edges[e0:e1, 0], edges[e0:e1, 1]]) - v0)),
+                           shape=(ne, nv))
+            fr = np.flatnonzero(free[v0:v1])
+            if len(fr) == nv:                                 # no fixed vertex: pin one (constants are in the kernel)
+                fr = fr[1:]
+            Df = D[:, fr].tocsr()
+            DfT = Df.T.tocsr()
+            for b in range(B):
+                hb = hn[e0:e1, b]
+                lu = splu((DfT @ diags(hb) @ Df).tocsc(), permc_spec="MMD_AT_PLUS_A", diag_pivot_thresh=0.0,
+                          options=dict(SymmetricMode=True))
+                alpha[v0 + fr, b] = lu.solve(DfT @ (hb[:, None] * xn[e0:e1, b]))
+                facts.append((lu, fr, v0, b))
+        ctx.facts, ctx.ops = facts, (d0, d0T)
+        out = torch.as_tensor(alpha, dtype=x1.dtype, device=x1.device)
+        ctx.save_for_backward(x1, h, out)
+        return out
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx: Any, g: Tensor):  # noqa: D102
+        import numpy as np
+        x1, h, alpha = ctx.saved_tensors
+        d0, d0T = ctx.ops
+        gn = g.detach().to("cpu", torch.float64).numpy()
+        lam = np.zeros_like(gn)
+        for lu, fr, v0, b in ctx.facts:
+            lam[v0 + fr, b] = lu.solve(np.ascontiguousarray(gn[v0 + fr, b]))
+        d0lam = ops.spmm(d0, torch.as_tensor(lam, dtype=x1.dtype, device=x1.device).contiguous(), d0T)
+        gx = d0lam * h.unsqueeze(-1) if ctx.needs_input_grad[0] else None
+        gh = None
+        if ctx.needs_input_grad[1]:
+            gh = torch.linalg.vecdot(d0lam, x1 - ops.spmm(d0, alpha.contiguous(), d0T))
+        return gx, gh, None
+
+
+def direct_projection(ctx: LayerContext, x1: Tensor, H: Tensor, free: Tensor | None) -> tuple[Tensor, Tensor]:
+    """The potential of :func:`metric_projection` for a diagonal metric by sparse direct solves (one factorisation per
+    graph and sample on the CPU, float64; exact to round-off, no iteration count, gradients by the adjoint method).
+
+    Args:
+        ctx: context; x1: ``(n1, B, C)``; H: ``(n1, B)`` positive; free: free-vertex mask ``(n0, 1, 1)`` or ``None``.
+    Returns:
+        ``(alpha (n0, B, C), d0 alpha (n1, B, C))``; without fixed vertices the zero-mean potential of every graph.
+    """
+    K = ctx.K
+    n0 = K.n[0]
+    fr = torch.ones(n0, dtype=torch.bool) if free is None else (free.view(-1) > 0).cpu()
+    ptr = K.meta.get("ptr") if isinstance(K.meta, dict) else None
+    if ptr is None:
+        ptr = [torch.tensor([0, n]) for n in K.n]
+    cfg = (K.cells[1].cpu().numpy(), fr.numpy(), ptr[0].cpu().numpy(), ptr[1].cpu().numpy(), K.d[0], K.dT[0])
+    alpha = _DirectProjection.apply(x1.contiguous(), H.expand(x1.shape[0], x1.shape[1]).contiguous(), cfg)
+    if free is None or bool(fr.all()):
+        batch = ctx.batch[0] if ctx.batch is not None else None
+        mu = alpha.mean(0, keepdim=True) if batch is None else \
+            ops.segment_mean(alpha.reshape(n0, -1), batch, ctx.num_graphs)[batch].view_as(alpha)
+        alpha = alpha - mu
+    return alpha, spmm_ad(K.d[0], K.dT[0], alpha)
+
+
+def dense_projection(ctx: LayerContext, x1: Tensor, up: tuple, free: Tensor | None) -> tuple[Tensor, Tensor]:
+    """The potential of :func:`metric_projection` by batched dense Cholesky factorisations on the device in float64
+    (one factorisation per sample, exact to round-off, diagonal and tensor metrics; gradients by autograd through the
+    factorisation).  The operator ``s d0^T H d0 s`` of the sample is materialised by applying it to the identity, so the
+    solver is meant for complexes with one graph per batch and up to a few thousand vertices (the fixed meshes of the
+    paper tasks); block-diagonal batches of meshes use ``'direct'`` or ``'cg'``.
+
+    Args:
+        ctx: context; x1: ``(n1, B, C)``; up: ``('diag', geometry, H (n1, B, 1))`` or ``('tensor', geometry,
+            TensorMetric)``; free: free-vertex mask ``(n0, 1, 1)`` or ``None``.
+    Returns:
+        ``(alpha (n0, B, C), d0 alpha (n1, B, C))``; without fixed vertices the zero-mean potential.
+    """
+    K = ctx.K
+    n0, B, C = K.n[0], x1.shape[1], x1.shape[2]
+    if ctx.num_graphs != 1:
+        raise NotImplementedError("project_solver='dense' needs one graph per batch (use 'direct' or 'cg')")
+    g: BlockGeometry = up[1]
+    op = PhysicalHodge(ctx, up, None)
+    eye = torch.eye(n0, dtype=ctx.dtype, device=x1.device).unsqueeze(1).expand(n0, B, n0).contiguous()
+    A = op.apply(eye).permute(1, 0, 2)                                       # (B, n0, n0): A[b, i, j] = (A_sym,b)_ij
+    Hx = up[2] * x1 if up[0] == "diag" else up[2].apply(x1.contiguous())
+    b = spmm_ad(g.AT, g.A, Hx).permute(1, 0, 2)                              # (B, n0, C) = s d0^T H x1
+    fr = torch.ones(n0, dtype=torch.bool, device=x1.device) if free is None else (free.view(-1) > 0)
+    pinned = bool(fr.all())
+    if pinned:                                                               # constants in the kernel: pin one vertex
+        fr = fr.clone()
+        fr[0] = False
+    idx = torch.nonzero(fr).view(-1)
+    Af = A[:, idx][:, :, idx].to(torch.float64)
+    Af = 0.5 * (Af + Af.transpose(1, 2))
+    L = torch.linalg.cholesky(Af)
+    wf = torch.cholesky_solve(b[:, idx].to(torch.float64), L)               # (B, nf, C)
+    w = torch.zeros(B, n0, C, dtype=torch.float64, device=x1.device).index_copy(1, idx, wf)
+    y = w.permute(1, 0, 2).to(ctx.dtype).contiguous()                        # (n0, B, C) = s^-1 alpha
+    alpha = y if g.scale is None else y * g.scale
+    if free is None or pinned:                                               # defined up to a constant
+        alpha = alpha - alpha.mean(0, keepdim=True)
+    return alpha, spmm_ad(g.A, g.AT, y)
+
+
+class KuttaHead(nn.Module):
+    """Bounded log-weights ``kappa = a tanh(MLP(.))`` of the Kutta metric ``W = star1 exp(kappa)`` of a projection layer.
+
+    Edge features: the descriptors ``geo_1``, the mean and the absolute difference over the two end vertices of the
+    vertex descriptors ``geo_0`` (a corner of the boundary shows up in the angle defect of its vertex), the even edge
+    inputs, and the log energy density of the projected harmonic cochains relative to its mean over the graph.  All of
+    them are invariant under E(n), O(C), relabelling and orientation changes.  ``MLP: P -> hidden -> SiLU -> 1`` with a
+    zero-initialised last layer (``W = star1`` at initialisation).
+
+    ``corner = s > 0`` (optional prior, default off): ``kappa = a tanh(MLP(.) + s c_e)`` with a learnable slope ``s`` and
+    the corner indicator ``c_e in [0, 1]`` of the boundary edges at a re-entrant corner of the domain (:func:`corner
+    indicator <boundary_corner>`), where the potential flow is singular: the weights start concentrated at sharp
+    trailing edges instead of learning that from the data.
+
+    Args:
+        geo0, geo1: descriptor widths of vertices and edges; even1: even edge input columns; hidden; log_range: ``a``.
+        corner: initial slope of the corner prior (0: no prior).
+    """
+
+    def __init__(self, geo0: int, geo1: int, even1: int = 0, hidden: int = 32, log_range: float = 8.0,
+                 corner: float = 0.0) -> None:
+        super().__init__()
+        self.geo_dim = int(geo1) + 2 * int(geo0)
+        self.in_dim = 1 + int(even1)
+        self.log_range = float(log_range)
+        self.fc1 = nn.Linear(self.in_dim + self.geo_dim, hidden)
+        self.fc2 = nn.Linear(hidden, 1)
+        nn.init.zeros_(self.fc2.weight)
+        nn.init.zeros_(self.fc2.bias)
+        self.corner = nn.Parameter(torch.tensor(float(corner))) if corner > 0 else None
+
+    def forward(self, geo: Tensor, feats: Tensor, corner: Tensor | None = None) -> Tensor:
+        """``geo (n1, geo1 + 2 geo0)``, ``feats (n1, B, 1 + even1)``, ``corner (n1,)`` -> ``kappa (n1, B)`` in
+        ``[-a, a]``."""
+        W, b = self.fc1.weight, self.fc1.bias
+        e = F.linear(geo, W[:, self.in_dim:], b).unsqueeze(1)
+        z = mlp2(feats, W[:, :self.in_dim], e, self.fc2.weight, self.fc2.bias).squeeze(-1)
+        z = z.double() if feats.dtype == torch.float64 else z.float()
+        if getattr(self, "corner", None) is not None and corner is not None:
+            z = z + self.corner * corner.to(z.dtype).unsqueeze(1)
+        return self.log_range * torch.tanh(z)
+
+
+def boundary_corner(ctx: LayerContext) -> Tensor:
+    """Corner indicator of the edges, ``(n1,)`` in ``[0, 1]``: for a boundary edge the larger of
+    ``clamp((-defect - pi/2) / (pi/2), 0, 1)`` over its two end vertices (``defect = pi - interior angle sum`` of a
+    boundary vertex, the vertex descriptor ``angle_defect``); 0 for interior edges and on smooth or convex parts of the
+    boundary, close to 1 at a sharp re-entrant corner (interior angle towards 2 pi, e.g. a trailing edge seen from the
+    fluid).  Intrinsic: E(n)-, relabelling- and orientation-invariant."""
+    from .geometry import GEO_FEATURE_NAMES
+    K = ctx.K
+    g0, g1 = ctx.geo[0], ctx.geo[1]
+    i_def, i_b0 = GEO_FEATURE_NAMES[0].index("angle_defect"), GEO_FEATURE_NAMES[0].index("boundary")
+    i_b1 = GEO_FEATURE_NAMES[1].index("boundary")
+    c = ((-g0[:, i_def] - 0.5 * math.pi) / (0.5 * math.pi)).clamp(0.0, 1.0) * g0[:, i_b0]
+    e = K.cells[1].long()
+    return torch.maximum(c[e[:, 0]], c[e[:, 1]]) * g1[:, i_b1]
+
+
 # --------------------------------------------------------------------------------------------------------------
 # gate
 # --------------------------------------------------------------------------------------------------------------
@@ -1458,8 +1808,16 @@ class RadialGate(nn.Module):
 
     ``gate='none'`` (linear models, e.g. the solver preset): ``x + gamma * m`` (no nonlinearity, no normalisation).
 
+    ``gate='homog'`` (homogeneous of degree one in the field amplitude): ``x + gamma * 2 sigmoid(MLP(xi)) * m`` with
+    the scale-invariant per-cell invariants ``xi = [log((|m|^2/C + eps) / (|x|^2/C + eps)), <x, m> / (C sqrt((|x|^2/C
+    + eps)(|m|^2/C + eps)))]``, ``eps = HOMOG_EPS (|x|^2 + |m|^2) / C`` (relative size and alignment of the message;
+    ``MLP: 2 -> hidden -> SiLU -> 1``, last layer zero-initialised, so the update is ``x + gamma m`` at
+    initialisation).  Scaling ``(x, m) -> (lambda x, lambda m)`` leaves the factor unchanged, so a stack of such layers
+    keeps the amplitude of its input instead of bounding every update by ``gamma``; with a constant factor it is a
+    linear filter.
+
     Args:
-        mode: ``'norm' | 'relu' | 'none'``.
+        mode: ``'norm' | 'relu' | 'none' | 'homog'``.
         hidden: hidden width of the gate MLP.
     """
 
@@ -1468,8 +1826,24 @@ class RadialGate(nn.Module):
         if mode not in _GATES:
             raise ValueError(f"gate must be one of {_GATES}, got {mode!r}")
         self.mode = mode
-        self.mlp = nn.Sequential(nn.Linear(1, hidden), nn.SiLU(), nn.Linear(hidden, 1)) if mode == "norm" else None
+        n_in = 2 if mode == "homog" else 1
+        self.mlp = nn.Sequential(nn.Linear(n_in, hidden), nn.SiLU(), nn.Linear(hidden, 1)) \
+            if mode in ("norm", "homog") else None
+        if mode == "homog":
+            nn.init.zeros_(self.mlp[2].weight)
+            nn.init.zeros_(self.mlp[2].bias)
         self.gain = nn.Parameter(torch.ones(()))
+
+    def homog_scale(self, x: Tensor, m: Tensor) -> Tensor:
+        """Per-cell factor ``gamma * 2 sigmoid(MLP(xi))`` ``(n, B, 1)`` of the homogeneous gate (scale invariant)."""
+        mx, mm = mean_square(x).unsqueeze(-1), mean_square(m).unsqueeze(-1)                       # (n, B, 1)
+        eps = HOMOG_EPS * (mx + mm) + 1e-30
+        mx, mm = mx + eps, mm + eps
+        cos = torch.linalg.vecdot(x, m).unsqueeze(-1) / (x.shape[-1] * torch.sqrt(mx) * torch.sqrt(mm))
+        xi = torch.cat([torch.log(mm / mx), cos], dim=-1)
+        l1, l2 = self.mlp[0], self.mlp[2]
+        z = mlp2(xi, l1.weight, l1.bias, l2.weight, l2.bias)
+        return self.gain * 2.0 * torch.sigmoid(z.to(mx.dtype))
 
     def scale(self, m: Tensor) -> Tensor:
         """Per-cell factor ``a`` ``(n, B, 1)`` such that the update is ``m ⊙ a``."""
@@ -1485,9 +1859,52 @@ class RadialGate(nn.Module):
         """Residual update ``x + m ⊙ a(m)``: ``(n, B, C), (n, B, C) -> (n, B, C)``."""
         if self.mode == "none":
             return x + self.gain * m
+        if self.mode == "homog":
+            return residual_scale(x, m, self.homog_scale(x, m))
         if self.mode == "relu":
             m = F.relu(m)
         return residual_scale(x, m, self.scale(m))
+
+
+class TermGate(nn.Module):
+    """Per-term gates of a polynomial layer (O(C)-equivariant, homogeneous of degree zero in the field amplitude).
+
+    The message of degree ``k`` is ``m = sum_j c_j g_j t_j`` over its terms ``t_j`` (the powers ``L_up^p x``,
+    ``L_dn^p x`` and the cross terms ``T_up x_{k+1}``, ``T_dn x_{k-1}``) with per-cell factors
+    ``g = 2 sigmoid(MLP(xi))`` from the scale-invariant invariants of the term vectors relative to the layer input,
+    ``xi_j = [log((|t_j|^2/C + eps_j) / (|x|^2/C + eps_j)), <x, t_j> / (C sqrt((|x|^2/C + eps_j)(|t_j|^2/C +
+    eps_j)))]`` with ``eps_j = HOMOG_EPS (|x|^2 + |t_j|^2) / C`` (``MLP: 2 J -> hidden -> SiLU -> J``, last layer
+    zero-initialised: ``g = 1``, the plain polynomial layer, at initialisation).  The factors are O(C)-invariant and
+    even, so the message stays an O(C)-equivariant odd cochain; the filter becomes cell- and configuration-dependent.
+
+    Args:
+        n_terms: ``J``.
+        hidden: hidden width of the MLP.
+    """
+
+    def __init__(self, n_terms: int, hidden: int = 16) -> None:
+        super().__init__()
+        self.n_terms = int(n_terms)
+        self.fc1 = nn.Linear(2 * self.n_terms, hidden)
+        self.fc2 = nn.Linear(hidden, self.n_terms)
+        nn.init.zeros_(self.fc2.weight)
+        nn.init.zeros_(self.fc2.bias)
+
+    def forward(self, x: Tensor, terms: list[Tensor]) -> Tensor:
+        """Factors ``(n, B, J)`` for the terms ``[(n, B, C)] * J`` of the input ``x`` ``(n, B, C)``."""
+        if len(terms) != self.n_terms:
+            raise ValueError(f"TermGate expected {self.n_terms} terms, got {len(terms)}")
+        C = x.shape[-1]
+        mx0 = mean_square(x)                                                # (n, B)
+        feats = []
+        for t in terms:
+            mt = mean_square(t)
+            eps = HOMOG_EPS * (mx0 + mt) + 1e-30
+            mx, mt = mx0 + eps, mt + eps
+            feats.append(torch.log(mt / mx))
+            feats.append(torch.linalg.vecdot(x, t) / (C * torch.sqrt(mx) * torch.sqrt(mt)))
+        z = mlp2(torch.stack(feats, dim=-1), self.fc1.weight, self.fc1.bias, self.fc2.weight, self.fc2.bias)
+        return 2.0 * torch.sigmoid(z.to(mx.dtype))
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -1540,8 +1957,17 @@ class RHMPLayer(nn.Module):
         identity_metric: every metric ``H = 1`` (ablation of the learned metric; with ``scaling='dec'`` the DEC stars
             of the block's own degree remain through the scaling ``S``; see ``RHMPConfig.identity_metric``).
         fused: use the fused polynomial kernels (``False`` = plain autograd reference path).
-        kind: ``'poly'`` (polynomial filters) or ``'resolvent'`` (self term ``(I + tau_up L_up + tau_dn L_dn)^{-1} x``
-            by batched CG, DESIGN §9.2; learnable ``tau = exp(log_tau) <= TAU_MAX`` per degree and block, init 1).
+        kind: ``'poly'`` (polynomial filters), ``'resolvent'`` (self term ``(I + tau_up L_up + tau_dn L_dn)^{-1} x``
+            by batched CG, DESIGN §9.2; learnable ``tau = exp(log_tau) <= TAU_MAX`` per degree and block, init 1),
+            ``'solve'`` or ``'project'`` (metric Hodge projection of the edge features with the learned edge metric,
+            harmonic / Kutta correction and vertex potential; :meth:`_project_forward`; uses ``solve_iters``,
+            ``solve_tol``, ``solve_precond``).
+        project_harmonic: projection layers remove the circulation along the cohomology generators of the complex
+            (``K.meta['cohomology'][1]``) in the learned Kutta metric (default True; no effect without generators).
+        kutta_range: bound of the log Kutta weights (``W / star1`` in ``[e^-a, e^a]``).
+        project_solver: ``'cg'`` (preconditioned CG, :func:`metric_projection`) or ``'direct'`` (sparse LU per graph
+            and sample on the CPU, :func:`direct_projection`; diagonal metrics).
+        kutta_corner: initial slope of the corner prior of the Kutta weights (:class:`KuttaHead`; 0: off).
         resolvent_iters: CG iterations of resolvent layers.
         resolvent_grad: ``'implicit'`` (adjoint solve) or ``'unrolled'`` (checkpointed unrolled iterations).
         metric_type: ``'diag'`` or ``'tensor'`` (Whitney material-tensor metric for the up blocks and cross-up terms of
@@ -1555,7 +1981,8 @@ class RHMPLayer(nn.Module):
             global magnitude then matters (the ``beta``-normalised ``L_hat`` is invariant to ``H -> c H``).
         solve_iters, solve_tol, solve_bc: ``kind='solve'``: CG budget and boundary condition (``'dirichlet'``: fixed
             ``K.meta['dirichlet'][k]`` or ``K.boundary[k]`` cells; ``'none'``; ``'neumann'``: no fixed cells and
-            mean-free vertex sources, see :func:`physical_solve`).  A solve layer computes
+            mean-free vertex sources; ``'lift'``: the fixed cells of ``'dirichlet'`` keep the layer input as
+            inhomogeneous Dirichlet data, see :func:`physical_solve`).  A solve layer computes
             ``y_k = (Delta_H + lam / L^2)^{-1} x_k`` with the un-normalised metric Hodge Laplacian (physical units),
             ``lam = softplus(log_lam)`` (init 1e-3), and updates ``x_k <- gate(x_k, y_k - x_k [+ cross terms])``;
             with ``gate='none'`` (gain 1) this is ``x_k <- y_k``.
@@ -1563,6 +1990,28 @@ class RHMPLayer(nn.Module):
             (:class:`rhmp.metric.TensorMetricHead`).
         solve_precond: ``'none'`` (Jacobi) or ``'twolevel'`` (Jacobi plus a coarse correction for vertex solves;
             :func:`physical_solve`).
+        term_gates: polynomial layers with diagonal metrics only: every term of the message (each power ``L^p x``
+            and each cross term) gets its own per-cell factor from scale-invariant invariants (:class:`TermGate`),
+            ``m_k = sum_j c_j g_j t_j``; ``False`` (default) is the plain polynomial message.
+        transport: transport specification (``rhmp.transport``; poly and resolvent layers): the vertex message
+            gains ``sum_p g_p T^p x_0`` with ``T`` the dual-cell flux balance along edge transport fields and the
+            layer's edge metric ``H_1``.  ``None`` / empty: off.
+        solve_picard: ``kind='solve'``: number ``J`` of fixed-point (Picard) iterations of the vertex solve with a
+            state-dependent metric (0: one solve with the metric of the layer input, the default).  Iteration ``j``
+            predicts the metric of the vertex block (``H_1``: the diagonal edge head ``H1`` or the tensor head ``T1``)
+            from the usual descriptors plus the field-energy invariant of the previous iterate
+            (:meth:`picard_energy_feature`, ``y_0 = 0``), solves with the layer input as right-hand side and relaxes:
+            ``y_1 = S(H_1) x``, ``y_j = y_{j-1} + omega (S(H_j) x - y_{j-1})``; weight-tied, ``omega = sigmoid(.)``
+            learnable.  Other degrees of a Picard layer use one solve whose metric sees the energy invariant of the
+            layer input ``x_0``.
+        picard_relax: initial relaxation ``omega`` in (0, 1) of Picard layers.
+        metric_geo: ``False`` removes the geometric descriptors from the inputs of the metric heads (material columns
+            and feature invariants only): the learned metric is then a function of the material and of the state,
+            i.e. a constitutive law, and cannot encode mesh-specific position cues.
+        picard_init: state of the first Picard iteration: ``'zero'`` (``y_0 = 0``, the default: the first metric is
+            the zero-field law) or ``'learned'`` (a learnable uniform energy invariant ``f_0 = softplus(.) >= 0``, a
+            starting operating point, so that the zero-field law of the later iterations does not have to double as
+            the initial guess; zero-initialised to ``f_0 ~ 3e-4``).
     """
 
     def __init__(self, top: int, geo_dims: dict[int, int], even_dims: dict[int, int], *, C: int, poly_order: int = 2,
@@ -1571,7 +2020,11 @@ class RHMPLayer(nn.Module):
                  kind: str = "poly", resolvent_iters: int = 20, resolvent_grad: str = "implicit",
                  metric_type: str = "diag", resolvent_warm_start: bool = True, learn_metric: bool = True,
                  resolvent_normalize: bool = True, solve_iters: int = 64, solve_tol: float = 1e-6,
-                 solve_bc: str = "dirichlet", tensor_param: str = "full", solve_precond: str = "none") -> None:
+                 solve_bc: str = "dirichlet", tensor_param: str = "full", solve_precond: str = "none",
+                 term_gates: bool = False, project_harmonic: bool = True, kutta_range: float = 8.0,
+                 project_solver: str = "cg", kutta_corner: float = 0.0, transport: dict | None = None,
+                 solve_picard: int = 0, picard_relax: float = 0.5, metric_geo: bool = True,
+                 picard_init: str = "zero") -> None:
         super().__init__()
         if top < 1:
             raise ValueError("RHMPLayer needs a complex with at least one edge degree (top >= 1)")
@@ -1579,8 +2032,10 @@ class RHMPLayer(nn.Module):
             raise ValueError("poly_order must be >= 1")
         if scaling not in _SCALINGS:
             raise ValueError(f"scaling must be one of {_SCALINGS}, got {scaling!r}")
-        if kind not in ("poly", "resolvent", "solve"):
-            raise ValueError(f"layer kind must be 'poly', 'resolvent' or 'solve', got {kind!r}")
+        if kind not in ("poly", "resolvent", "solve", "project"):
+            raise ValueError(f"layer kind must be 'poly', 'resolvent', 'solve' or 'project', got {kind!r}")
+        if kind == "project" and scaling == "jacobi":
+            raise ValueError("projection layers need scaling 'dec' or 'none'")
         if solve_bc not in _SOLVE_BCS:
             raise ValueError(f"solve_bc must be one of {_SOLVE_BCS}, got {solve_bc!r}")
         if solve_precond not in ("none", "twolevel"):
@@ -1613,24 +2068,39 @@ class RHMPLayer(nn.Module):
         if tensor_param not in ("cone", "full"):
             raise ValueError(f"tensor_param must be 'cone' or 'full', got {tensor_param!r}")
         self.tensor_param = tensor_param
+        if solve_picard < 0 or (solve_picard > 0 and kind != "solve"):
+            raise ValueError("solve_picard needs kind='solve' and solve_picard >= 0")
+        if not 0.0 < picard_relax < 1.0:
+            raise ValueError(f"picard_relax must be in (0, 1), got {picard_relax}")
+        if picard_init not in ("zero", "learned"):
+            raise ValueError(f"picard_init must be 'zero' or 'learned', got {picard_init!r}")
+        self.picard = int(solve_picard)
+        # Picard layers: the edge-metric heads (H1 / T1) see one more invariant, the field energy of the iterate
+        n_picard = 1 if self.picard > 0 else 0
+        self.metric_geo = bool(metric_geo)
+        gd_m = {m: (g if self.metric_geo else 0) for m, g in geo_dims.items()}      # descriptor widths of the heads
         # degrees whose metric is a Whitney material tensor in tensor mode (up blocks + cross-up terms)
         self.tensor_degrees = list(range(1, self.top)) if metric_type == "tensor" else []
         self.heads = nn.ModuleDict()
+        project = kind == "project"                       # a projection layer only uses the edge metric H_1 (up usage)
+        head_degrees = range(self.top + 1) if not project else ([] if 1 in self.tensor_degrees else [1])
         if not self.identity_metric and self.learn_metric:
-            for m in range(self.top + 1):
-                args = (geo_dims[m], even_dims.get(m, 0), metric_feature_dim(m, self.top), metric_hidden, log_range)
+            for m in head_degrees:
+                args = (gd_m[m], even_dims.get(m, 0), metric_feature_dim(m, self.top) + (n_picard if m == 1 else 0),
+                        metric_hidden, log_range)
                 if self.tie:
                     self.heads[f"H{m}"] = MetricHead(*args)
                 else:
                     if m >= 1:
                         self.heads[f"Hu{m}"] = MetricHead(*args)
-                    if m < self.top:
+                    if m < self.top and not project:
                         self.heads[f"Hd{m}"] = MetricHead(*args)
         self.theads = nn.ModuleDict()
         for km in (self.tensor_degrees if self.learn_metric else []):
             top_ = self.top
-            in_top = geo_dims[top_] + metric_feature_dim(top_, top_) + even_dims.get(top_, 0)
-            in_edge = geo_dims[1] + metric_feature_dim(1, top_) + even_dims.get(1, 0)
+            n_e = n_picard if km == 1 else 0
+            in_top = gd_m[top_] + metric_feature_dim(top_, top_) + even_dims.get(top_, 0) + n_e
+            in_edge = gd_m[1] + metric_feature_dim(1, top_) + even_dims.get(1, 0) + n_e
             self.theads[f"T{km}"] = TensorMetricHead(in_top, in_edge, metric_hidden, log_range, tensor_param)
         init = torch.zeros(self.poly_order)
         init[0] = 1.0
@@ -1645,11 +2115,45 @@ class RHMPLayer(nn.Module):
                     self.coef[key] = nn.Parameter(init.clone())
                 elif self.kind == "resolvent":
                     self.log_tau[key] = nn.Parameter(torch.zeros(()))
-                if self.cross:
+                if self.cross and not project:
                     self.wcross[key] = nn.Parameter(torch.tensor(0.5))
             if self.kind == "solve":
                 self.log_lam[str(k)] = nn.Parameter(torch.tensor(math.log(math.expm1(1e-3))))   # lam = 1e-3
-        self.gates = nn.ModuleList([RadialGate(gate) for _ in range(self.top + 1)])
+        if self.picard > 0:
+            self.picard_logit = nn.Parameter(torch.tensor(math.log(picard_relax / (1.0 - picard_relax))))
+            self.picard_log_e0 = nn.Parameter(torch.zeros(()))                  # energy scale of the invariant
+            if picard_init == "learned":                                        # starting operating point
+                self.picard_f0_raw = nn.Parameter(torch.tensor(-8.0))           # softplus(-8) = 3.4e-4
+        self.picard_init = picard_init if self.picard > 0 else "zero"
+        self.last_picard: dict = {}
+        self.proj = nn.ParameterDict()
+        if project_solver not in ("cg", "direct", "dense"):
+            raise ValueError(f"project_solver must be 'cg', 'direct' or 'dense', got {project_solver!r}")
+        self.project_solver = project_solver
+        self.project_harmonic = bool(project_harmonic)
+        self.kutta = None
+        if project:
+            # weights of the three parts of the update (1: the projection itself): -a d0 alpha on the edges, the
+            # harmonic (Kutta) correction -g sum_r Gamma_r gamma_r, and the potential b alpha on the vertices
+            for key in ("a", "b", "g"):
+                self.proj[key] = nn.Parameter(torch.ones(()))
+            if self.project_harmonic:
+                self.kutta = KuttaHead(geo_dims[0], geo_dims[1], even_dims.get(1, 0), metric_hidden, kutta_range,
+                                       kutta_corner)
+        self.gates = nn.ModuleList([RadialGate(gate) for _ in range(2 if project else self.top + 1)])
+        self.term_gates = nn.ModuleDict()
+        if term_gates:
+            if self.kind != "poly" or self.tensor_degrees:
+                raise ValueError("term_gates need polynomial layers with diagonal metrics")
+            for k in range(self.top + 1):
+                n_blocks = int(k < self.top) + int(k > 0)
+                self.term_gates[str(k)] = TermGate(n_blocks * (self.poly_order + int(self.cross)))
+        self.transport = None
+        if transport:
+            if kind in ("solve", "project") or scaling == "jacobi":
+                raise ValueError("the transport term needs a 'poly' or 'resolvent' layer and scaling 'dec' or 'none'")
+            from .transport import TransportTerm
+            self.transport = TransportTerm(transport)
         self.last_diagnostics: dict[str, Tensor] = {}
 
     # ---------------------------------------------------------------------------------------------------------
@@ -1675,7 +2179,8 @@ class RHMPLayer(nn.Module):
         return torch.stack(feats, dim=-1)
 
     def metrics(self, x: list[Tensor], q: SharedCoboundaries, ctx: LayerContext, need_up: list[int] | None = None,
-                need_dn: list[int] | None = None) -> tuple[list[Tensor | None], list[Tensor | None]]:
+                need_dn: list[int] | None = None, extra: dict | None = None
+                ) -> tuple[list[Tensor | None], list[Tensor | None]]:
         """Log-metrics of the blocks.
 
         Args:
@@ -1684,6 +2189,8 @@ class RHMPLayer(nn.Module):
             ctx: context.
             need_up: degrees ``m`` whose up-usage metric is needed (default: ``1..K``).
             need_dn: degrees ``m`` whose down-usage metric is needed (default: ``0..K-1``).
+            extra: optional ``{m: (n_m, B)}`` invariants appended to the head features of degree ``m`` (Picard
+                layers: the field-energy invariant on edges).
 
         Returns:
             ``(logH_up, logH_dn)``: ``logH_up[m]`` ``(n_m, B)`` is used by the up block of degree ``m-1`` and
@@ -1715,6 +2222,8 @@ class RHMPLayer(nn.Module):
                     self._record_metric(diag, f"H{m}", torch.zeros_like(lh), lh, m, ctx, 1.0)
                 continue
             feats = self._metric_features(m, x, q, ctx)
+            if extra is not None and m in extra:
+                feats = torch.cat([feats, extra[m].unsqueeze(-1).to(feats.dtype)], dim=-1)
             if self.tie:
                 phi = self.heads[f"H{m}"](ctx.geo[m], ctx.even[m], feats)
                 lh = (ls + phi).clamp(-LOG_H_MAX, LOG_H_MAX)
@@ -1754,15 +2263,18 @@ class RHMPLayer(nn.Module):
                                   logcond_total, clamp, sat])
 
     def _descriptors(self, m: int, x: list[Tensor], q: SharedCoboundaries, ctx: LayerContext) -> Tensor:
-        """``[geo_m, invariants_m, even_m]`` per cell and sample, ``(n_m, B, P_m)``."""
+        """``[geo_m, invariants_m, even_m]`` per cell and sample, ``(n_m, B, P_m)`` (no ``geo_m`` if not
+        ``metric_geo``)."""
         f = self._metric_features(m, x, q, ctx)
-        parts = [ctx.geo[m].unsqueeze(1).expand(-1, f.shape[1], -1), f]
+        parts = [ctx.geo[m].unsqueeze(1).expand(-1, f.shape[1], -1), f] if self.metric_geo else [f]
         if ctx.even[m] is not None:
             parts.append(ctx.even[m])
         return torch.cat(parts, dim=-1)
 
-    def tensor_metric(self, km: int, x: list[Tensor], q: SharedCoboundaries, ctx: LayerContext) -> "TensorMetric":
-        """The Galerkin material-tensor metric of degree ``km`` (:class:`TensorMetric`).
+    def tensor_metric(self, km: int, x: list[Tensor], q: SharedCoboundaries, ctx: LayerContext,
+                      extra: tuple[Tensor, Tensor] | None = None) -> "TensorMetric":
+        """The Galerkin material-tensor metric of degree ``km`` (:class:`TensorMetric`); ``extra = (on top cells
+        (n_top, B), on edges (n_1, B))`` invariants appended to the descriptors (Picard layers: field energy).
 
         Learned full tensors (``tensor_param='full'``): ``sigma_f = b_f expm(sum_j s_j t_j t_j^T)`` (any SPD tensor;
         ``s = log_range tanh(.)``, zero-init -> ``b_f I``) assembled into explicit Galerkin element matrices; learned cone
@@ -1782,6 +2294,9 @@ class RHMPLayer(nn.Module):
         if self.learn_metric:
             psi_top = self._descriptors(self.top, x, q, ctx)                  # (n_top, B, P_top)
             psi_1 = self._descriptors(1, x, q, ctx)                           # (n_1, B, P_1)
+            if extra is not None:
+                psi_top = torch.cat([psi_top, extra[0].unsqueeze(-1).to(psi_top.dtype)], dim=-1)
+                psi_1 = torch.cat([psi_1, extra[1].unsqueeze(-1).to(psi_1.dtype)], dim=-1)
             psi_e = psi_1.index_select(0, de.reshape(-1)).view(de.shape[0], de.shape[1], *psi_1.shape[1:])
             head = self.theads[f"T{km}"]
             b, a = head(psi_top, psi_e)
@@ -1896,6 +2411,29 @@ class RHMPLayer(nn.Module):
             return poly_block(q1, h, c, u, X, op)
         return poly_block_reference(x[k], h, c, u, X, op, q1=q1)
 
+    def block_terms(self, up: bool, k: int, x: list[Tensor], q1: Tensor | None, log_H: Tensor,
+                    ctx: LayerContext) -> tuple[list[Tensor], list[Tensor]]:
+        """The separate terms of :meth:`block` (for per-term gates): ``[L x, .., L^P x, T x_nb]`` and their scalar
+        coefficients ``[c_1, .., c_P, w]`` (the cross term only with ``cross``); each term ``(n_k, B, C)``."""
+        op = block_operands(ctx, k, up, log_H)
+        key = f"up{k}" if up else f"dn{k}"
+        h = torch.exp(op.log_h).unsqueeze(-1)
+        c = self.coef[key]
+        q = spmm_ad(op.A, op.AT, _mul(x[k], op.s)) if q1 is None else q1
+        terms, coefs = [], []
+        for p in range(c.shape[0]):
+            y = _mul(spmm_ad(op.AT, op.A, h * q), op.s)                       # L^{p+1} x
+            terms.append(y)
+            coefs.append(c[p])
+            if p + 1 < c.shape[0]:
+                q = spmm_ad(op.A, op.AT, _mul(y, op.s))
+        if self.cross:
+            terms.append(apply_T(op, x[op.nb]))
+            coefs.append(self.wcross[key])
+        if ctx.record:
+            self.last_diagnostics[f"beta_{'up' if up else 'down'}{k}"] = op.beta.detach().float().mean()
+        return terms, coefs
+
     def forward(self, x: list[Tensor], ctx: LayerContext, degrees: list[int] | None = None) -> list[Tensor]:
         """One synchronous update of all degrees (or only of ``degrees``).
 
@@ -1914,23 +2452,50 @@ class RHMPLayer(nn.Module):
         degrees = list(range(top + 1)) if degrees is None else [k for k in range(top + 1) if k in degrees]
         if ctx.record:
             self.last_diagnostics = {}
+        if self.kind == "project":
+            return self._project_forward(x, ctx, degrees)
         q = SharedCoboundaries(x, ctx)
         need_up = [k + 1 for k in degrees if k < top]
         need_dn = [k - 1 for k in degrees if k > 0]
         tensor_up = [k for k in degrees if (k + 1) in self.tensor_degrees]  # up blocks with a Whitney metric
         need_up = [m for m in need_up if (m - 1) not in tensor_up]
+        if self.picard > 0:                                                 # Picard layer: energy invariant of x_0
+            if 0 in degrees:
+                need_up = [m for m in need_up if m != 1]                    # the vertex block is set per iteration
+                tensor_up = [k for k in tensor_up if k != 0]
+            ef = self.picard_energy_feature(x[0], ctx)
+            logH_up, logH_dn = self.metrics(x, q, ctx, need_up, need_dn, extra={1: ef[1]})
+            tens = {k + 1: self.tensor_metric(k + 1, x, q, ctx, extra=ef) for k in tensor_up}
+            return self._solve_forward(x, ctx, degrees, logH_up, logH_dn, tens, q=q)
         logH_up, logH_dn = self.metrics(x, q, ctx, need_up, need_dn)
         tens = {k + 1: self.tensor_metric(k + 1, x, q, ctx) for k in tensor_up}
         if self.kind == "solve":
             return self._solve_forward(x, ctx, degrees, logH_up, logH_dn, tens)
+        extra = self._transport_message(x, q, ctx, degrees, logH_up, tens)
         if self.kind == "resolvent":
             if tens and self.resolvent_normalize:
                 raise NotImplementedError("normalised resolvent layers use diagonal metrics; set metric_type='diag' "
                                           "or resolvent_normalize=False")
-            return self._resolvent_forward(x, ctx, degrees, logH_up, logH_dn, tens)
+            return self._resolvent_forward(x, ctx, degrees, logH_up, logH_dn, tens, extra=extra)
         jacobi = self.scaling == "jacobi"
         out = list(x)
         for k in degrees:
+            if self.term_gates:                                             # per-term gated message
+                terms, coefs = [], []
+                for up in (True, False):
+                    if (up and k < top) or (not up and k > 0):
+                        q1 = None if jacobi else (q.up(k) if up else q.dn(k))
+                        t, c = self.block_terms(up, k, x, q1, logH_up[k + 1] if up else logH_dn[k - 1], ctx)
+                        terms += t
+                        coefs += c
+                g = self.term_gates[str(k)](x[k], terms)
+                msg = terms[0] * (coefs[0] * g[..., :1])
+                for j in range(1, len(terms)):
+                    msg = msg + terms[j] * (coefs[j] * g[..., j:j + 1])
+                if k in extra:                                              # transport term (not term-gated)
+                    msg = msg + extra[k]
+                out[k] = self.gates[k](x[k], msg)
+                continue
             msg = None
             if k in tensor_up:
                 msg = self.tensor_block(k, x, q.up(k), tens[k + 1], ctx)
@@ -1939,8 +2504,20 @@ class RHMPLayer(nn.Module):
             if k > 0:
                 md = self.block(False, k, x, None if jacobi else q.dn(k), logH_dn[k - 1], ctx)
                 msg = md if msg is None else msg + md
+            if k in extra:
+                msg = msg + extra[k]
             out[k] = self.gates[k](x[k], msg)
         return out
+
+    def _transport_message(self, x: list[Tensor], q: SharedCoboundaries, ctx: LayerContext, degrees: list[int],
+                           logH_up: list[Tensor | None], tens: dict) -> dict[int, Tensor]:
+        """``{0: transport message (n_0, B, C)}`` of the transport term (``rhmp.transport``), or ``{}`` when the layer
+        has none or does not update the vertices."""
+        if self.transport is None or 0 not in degrees:
+            return {}
+        tm = tens.get(1)
+        return {0: self.transport(x, ctx, None if tm is not None else logH_up[1], tm, q.up(0),
+                                  self.last_diagnostics if ctx.record else None)}
 
     @torch.no_grad()
     def metric_fields(self, x: list[Tensor], ctx: LayerContext) -> dict:
@@ -1957,7 +2534,9 @@ class RHMPLayer(nn.Module):
         """
         q = SharedCoboundaries(x, ctx)
         top = self.top
-        logH_up, logH_dn = self.metrics(x, q, ctx, list(range(1, top + 1)), list(range(top)))
+        ef = self.picard_energy_feature(x[0], ctx) if self.picard > 0 else None
+        logH_up, logH_dn = self.metrics(x, q, ctx, list(range(1, top + 1)), list(range(top)),
+                                        extra=None if ef is None else {1: ef[1]})
         out: dict = {"log_ratio": {}, "phi": {}, "tensor": {}, "sigma": {}}
         for m in range(top + 1):
             ref = ctx.ref[m] if (ctx.ref is not None and ctx.ref[m] is not None) else 0.0
@@ -1968,7 +2547,7 @@ class RHMPLayer(nn.Module):
             out["log_ratio"][m] = lr
             out["phi"][m] = lr - ref
         for km in self.tensor_degrees:
-            tm = self.tensor_metric(km, x, q, ctx)
+            tm = self.tensor_metric(km, x, q, ctx, extra=ef if km == 1 else None)
             out["tensor"][km] = tm.as_dyads()
             out["sigma"][km] = tm.tensor()
         return out
@@ -1979,10 +2558,10 @@ class RHMPLayer(nn.Module):
 
     def _resolvent_forward(self, x: list[Tensor], ctx: LayerContext, degrees: list[int],
                            logH_up: list[Tensor | None], logH_dn: list[Tensor | None],
-                           tens: dict | None = None) -> list[Tensor]:
+                           tens: dict | None = None, extra: dict | None = None) -> list[Tensor]:
         """Resolvent layer: ``m_k = (I + tau_up L_up + tau_dn L_dn)^{-1} x_k + w_cu T_up x_{k+1} + w_cd T_dn x_{k-1}``
         (``resolvent_normalize=False``: ``(I + L^2 (tau_up Delta_up + tau_dn Delta_dn))^{-1} x_k`` with the physical
-        metric Hodge Laplacian)."""
+        metric Hodge Laplacian); ``extra[k]`` (the transport message) is added to ``m_k``."""
         top = self.top
         out = list(x)
         for k in degrees:
@@ -2029,19 +2608,213 @@ class RHMPLayer(nn.Module):
                         d[f"tau_{key}"] = t.detach().float()
                     if op is not None:
                         d[f"beta_{key}"] = op.beta.detach().float().mean()
+            if extra and k in extra:
+                msg = msg + extra[k]
             out[k] = self.gates[k](x[k], msg)
         return out
 
+    @staticmethod
+    def _graph_sum(ctx: LayerContext, v: Tensor, k: int) -> Tensor:
+        """Sum over the k-cells of every graph: ``(n_k, B, F) -> (1|G, B, F)``."""
+        if ctx.batch is None:
+            return v.sum(0, keepdim=True)
+        n, B, Fd = v.shape
+        return ops.segment_sum(v.reshape(n, B * Fd), ctx.batch[k], ctx.num_graphs).view(ctx.num_graphs, B, Fd)
+
+    def _project_core(self, x: list[Tensor], ctx: LayerContext, x1: Tensor) -> dict:
+        """Projection and Kutta correction of the cochains ``x1`` ``(n1, B, P)`` with the metrics this layer computes
+        from its input ``x`` (see :meth:`_project_forward`).  Returns ``alpha (n0, B, P)``, ``dalpha = d0 alpha``,
+        ``corr = sum_r Gamma_r gamma_r`` (``None`` without generators), ``Gamma (S, B, r, P)``, ``gamma (n1, B, r)``,
+        ``kappa (n1, B)`` (log Kutta weight), ``log_H (n1, B)`` (diagonal metrics), ``rel`` and ``n_it``."""
+        K = ctx.K
+        q = SharedCoboundaries(x, ctx)
+        g = ctx.blocks[(0, True)]
+        log_H = None
+        if 1 in self.tensor_degrees:
+            up = ("tensor", g, self.tensor_metric(1, x, q, ctx))
+        else:
+            logH_up, _ = self.metrics(x, q, ctx, [1], [])
+            log_H = logH_up[1]
+            up = ("diag", g, torch.exp(log_H).unsqueeze(-1))
+        n1, B, C = x1.shape
+        dt = ctx.dtype
+        gen = None
+        if self.project_harmonic:
+            co = K.meta.get("cohomology") if isinstance(K.meta, dict) else None
+            if isinstance(co, dict) and co.get(1) is not None and co[1].shape[1] > 0:
+                gen = co[1].to(device=x1.device, dtype=dt)
+        xa = x1 if gen is None else torch.cat([x1, gen.unsqueeze(1).expand(n1, B, gen.shape[1])], dim=-1)
+        free = dirichlet_free(ctx, 0, "dirichlet")
+        if self.project_solver == "direct":
+            if up[0] != "diag":
+                raise NotImplementedError("project_solver='direct' supports diagonal metrics (use 'dense' or 'cg' "
+                                          "with tensor metrics)")
+            alpha, dalpha = direct_projection(ctx, xa, up[2].squeeze(-1), free)
+            rel, n_it = torch.zeros(1, 1, dtype=dt, device=x1.device), 0
+        elif self.project_solver == "dense":
+            alpha, dalpha = dense_projection(ctx, xa, up, free)
+            rel, n_it = torch.zeros(1, 1, dtype=dt, device=x1.device), 0
+        else:
+            alpha, dalpha, rel, n_it = metric_projection(ctx, xa.contiguous(), up, free, self.solve_iters,
+                                                         self.solve_tol, self.solve_precond)
+        out = dict(alpha=alpha[..., :C], dalpha=dalpha[..., :C], corr=None, Gamma=None, gamma=None, kappa=None,
+                   log_H=log_H, rel=rel, n_it=n_it)
+        if gen is None:
+            return out
+        u = x1 - dalpha[..., :C]
+        gam = xa[..., C:] - dalpha[..., C:]                                  # (n1, B, r) projected generators
+        r = gam.shape[-1]
+        star1 = torch.exp(ctx.log_star[1]).unsqueeze(1)                      # (n1, 1)
+        with torch.no_grad():                                                # log energy density of the generators
+            en = star1 * gam.square().sum(-1)                                # relative to its mean over the graph
+            mean = ctx.cell_mean(en, 1)
+            lg = torch.log((en + 1e-12 * mean + 1e-30) / (mean + 1e-30)).unsqueeze(-1)
+        e = K.cells[1].long()
+        g0 = ctx.geo[0]
+        geo = torch.cat([ctx.geo[1], 0.5 * (g0[e[:, 0]] + g0[e[:, 1]]), (g0[e[:, 0]] - g0[e[:, 1]]).abs()], dim=-1)
+        feats = lg if ctx.even[1] is None else torch.cat([lg, ctx.even[1].to(dt)], dim=-1)
+        corner = boundary_corner(ctx) if getattr(self.kutta, "corner", None) is not None else None
+        kappa = self.kutta(geo, feats, corner)                               # (n1, B)
+        gw = gam * (star1 * torch.exp(kappa)).unsqueeze(-1)                  # W gamma
+        num = torch.stack([self._graph_sum(ctx, gw[..., j:j + 1] * u, 1) for j in range(r)], dim=2)     # (S,B,r,P)
+        gram = torch.stack([self._graph_sum(ctx, gw[..., j:j + 1] * gam, 1) for j in range(r)], dim=2)  # (S,B,r,r)
+        if r == 1:
+            Gam = num / gram.clamp_min(1e-30)
+        else:
+            tr = torch.diagonal(gram, dim1=-2, dim2=-1).sum(-1)[..., None, None]
+            eye = torch.eye(r, dtype=gram.dtype, device=gram.device)
+            Gam = torch.linalg.solve(gram + (1e-10 * tr + 1e-30) * eye, num)
+        Gc = Gam if ctx.batch is None else Gam[ctx.batch[1]]                 # (1|n1, B, r, P)
+        out.update(corr=(gam.unsqueeze(-1) * Gc).sum(2), Gamma=Gam, gamma=gam, kappa=kappa)
+        if ctx.record:
+            with torch.no_grad():
+                wg = (gw * gam).sum(-1)                                      # (n1, B) W-energy of the generators
+                self.last_diagnostics["kutta_share_max"] = \
+                    (ctx.cell_max(wg, 1) / self._graph_sum(ctx, wg.unsqueeze(-1), 1)[..., 0].clamp_min(1e-30)).mean()
+                self.last_diagnostics["kutta_circ_rms"] = Gam.detach().float().square().mean().sqrt()
+        return out
+
+    def _project_forward(self, x: list[Tensor], ctx: LayerContext, degrees: list[int]) -> list[Tensor]:
+        """Projection layer: metric Hodge (Leray) projection of the edge features with the learned edge metric ``H_1``,
+        the harmonic (Kutta) correction with the learned Kutta metric ``W``, and the potential on the vertices.
+
+        ``alpha = (d0^T H d0)^-1 d0^T H x_1`` on the free vertices (:func:`metric_projection`; fixed vertices:
+        ``K.meta['dirichlet'][0]`` or the boundary vertices), ``u = x_1 - d0 alpha``.  With closed generators ``c_r``
+        of ``H^1`` (``K.meta['cohomology'][1]``, projected in the same solve: ``gamma_r = c_r - d0 alpha_r``, closed and
+        co-closed on the free vertices) the circulation part of ``u`` is removed in the Kutta metric
+        ``W = star1 exp(kappa)`` (:class:`KuttaHead`): ``Gamma = <gamma, gamma>_W^-1 <gamma, u>_W`` per graph, sample and
+        channel, so that ``u - sum_r Gamma_r gamma_r`` is ``W``-orthogonal to every ``gamma_r`` (the Kutta condition
+        when ``W`` concentrates at a trailing edge); the result does not depend on the sign or scale of the
+        generators.  Messages: ``m_1 = -a d0 alpha - g sum_r Gamma_r gamma_r``, ``m_0 = b alpha / (sqrt(E_ref) L)``
+        (``E_ref``: :func:`reference_energy`, ``L^D`` the domain measure: the potential in units of field magnitude
+        times domain size), ``x_k <- gate_k(x_k, m_k)``.  Linear in ``x_1`` for fixed metrics and identical for every
+        channel (O(C)-equivariant); with ``a = g = 1`` and an identity gate the edge update is the projection.
+        """
+        x1 = x[1]
+        dt = ctx.dtype
+        core = self._project_core(x, ctx, x1)
+        m1 = -self.proj["a"] * core["dalpha"]
+        if core["corr"] is not None:
+            m1 = m1 - self.proj["g"] * core["corr"]
+        out = list(x)
+        if 1 in degrees:
+            out[1] = self.gates[1](x1, m1)
+        if 0 in degrees:
+            L = torch.exp(ctx.log_vol / self.top).view(-1, 1)                # (S, 1) domain length scale
+            unit = ctx.to_cells(torch.rsqrt(reference_energy(ctx)) / L, 0).unsqueeze(-1)
+            out[0] = self.gates[0](x[0], self.proj["b"] * core["alpha"] * unit.to(dt))
+        if ctx.record:
+            d = self.last_diagnostics
+            d["solve_res_proj"] = core["rel"].detach().float().max()
+            d["solve_it_proj"] = torch.tensor(float(core["n_it"]))
+        return out
+    def picard_energy_feature(self, y: Tensor, ctx: LayerContext) -> tuple[Tensor, Tensor]:
+        """Field-energy invariant of a vertex field ``y`` ``(n_0, B, C)`` for Picard layers.
+
+        ``e_f = (1/C) sum_c (d_0 y_c)_f^T G_f (d_0 y_c)_f / |f|`` per top cell (``G_f`` = the Whitney/Galerkin star block
+        of the unit tensor, so ``e_f`` = the mean over channels of ``|grad y_c|^2`` of the P1 field in physical units),
+        returned as ``0.5 log(1 + e / e_0)`` on the top cells and its mean over the incident top cells on the edges
+        (``e_0 = exp(picard_log_e0)`` learnable).  O(C)-, E(n)-, orientation- and relabelling-invariant, per sample.
+
+        Returns:
+            ``(on top cells (n_top, B), on edges (n_1, B))``.
+        """
+        K = ctx.K
+        W = K.whitney.get(1) if getattr(K, "whitney", None) else None
+        if W is None:
+            raise ValueError("Picard solve layers need the Whitney blocks K.whitney[1] (field-energy invariant)")
+        n_top, m = W["cells"].shape
+        B, C = y.shape[1], y.shape[2]
+        e = spmm_ad(K.d[0], K.dT[0], y.contiguous())                          # (n_1, B, C) edge differences
+        ql = spmm_ad(W["gather"], W["scatter"], e).view(m, n_top, B, C)       # slot values
+        G0 = W["G0"].to(y.dtype)                                              # (n_top, m, m)
+        en = torch.einsum("ifbc,fij,jfbc->fb", ql, G0, ql) / C                # sum_c q^T G q / C
+        en = en * K.star[self.top].to(y.dtype).view(-1, 1)                    # / |f|
+        f_top = 0.5 * torch.log1p(en.clamp_min(0.0) * torch.exp(-self.picard_log_e0.to(y.dtype)))
+        cnt = ops.spmm(W["scatter"], torch.ones(m * n_top, 1, dtype=y.dtype, device=y.device))
+        f_edge = spmm_ad(W["scatter"], W["gather"], f_top.repeat(m, 1).contiguous())    # slot-major rows
+        return f_top, f_edge / cnt.clamp_min(1.0)
+
+    def _picard_solve(self, x: list[Tensor], q: SharedCoboundaries, ctx: LayerContext, logH_up: list,
+                      logH_dn: list, tens: dict, shift: Tensor, free: Tensor | None, prev: Tensor | None):
+        """Fixed-point vertex solve (see ``solve_picard``).
+
+        Returns:
+            ``(y, y_sym, rel, n_it, logH_up)`` as :func:`physical_solve` (``n_it`` summed over the iterations) plus the
+            log-metrics with the last iteration's vertex block (diagonal metrics; used by the cross term).
+        """
+        omega = torch.sigmoid(self.picard_logit)
+        tensor = 1 in self.tensor_degrees
+        B = x[0].shape[1]
+        ef = (x[0].new_zeros(ctx.K.n[self.top], B), x[0].new_zeros(ctx.K.n[1], B))   # y_0 = 0
+        if self.picard_init == "learned":                                     # uniform starting invariant f_0
+            f0 = torch.nn.functional.softplus(self.picard_f0_raw).to(x[0].dtype)
+            ef = (ef[0] + f0, ef[1] + f0)
+        y = y_sym = rel = delta = None
+        lu, tj = list(logH_up), dict(tens)
+        n_tot, warm = 0, prev
+        for j in range(self.picard):
+            if j > 0:
+                ef = self.picard_energy_feature(y, ctx)
+            if tensor:
+                tj[1] = self.tensor_metric(1, x, q, ctx, extra=ef)
+            else:
+                lu[1] = self.metrics(x, q, ctx, [1], [], extra={1: ef[1]})[0][1]
+            op = physical_hodge(ctx, 0, lu, logH_dn, tj)
+            s, y_sym, rel, n_it = physical_solve(ctx, 0, x[0], op, shift, free, self.solve_iters, self.solve_tol,
+                                                 x0=warm, precond=self.solve_precond,
+                                                 mean_free=(self.solve_bc == "neumann"), lift=(self.solve_bc == "lift"))
+            n_tot += n_it
+            warm = y_sym.detach()
+            if y is None:
+                y = s
+            else:
+                y_new = y + omega * (s - y)
+                if ctx.record:
+                    with torch.no_grad():
+                        delta = float((y_new - y).norm() / y_new.norm().clamp_min(1e-30))
+                y = y_new
+        if ctx.record:
+            with torch.no_grad():
+                rec = dict(omega=omega.detach().float(), delta=delta, energy_feature=ef[0].detach())
+                if tensor:
+                    rec["sigma"] = tj[1].tensor().detach()
+                else:
+                    rec["log_ratio1"] = (lu[1] - ctx.log_star[1].unsqueeze(1)).detach()
+                self.last_picard = rec
+        return y, y_sym, rel, n_tot, lu
+
     def _solve_forward(self, x: list[Tensor], ctx: LayerContext, degrees: list[int],
-                       logH_up: list[Tensor | None], logH_dn: list[Tensor | None], tens: dict) -> list[Tensor]:
+                       logH_up: list[Tensor | None], logH_dn: list[Tensor | None], tens: dict,
+                       q: SharedCoboundaries | None = None) -> list[Tensor]:
         """Solve layer: ``y_k = (Delta_H + lam / L^2)^{-1} x_k`` (Dirichlet mask, physical units, implicit CG
-        gradients, warm start from the previous solve layer), ``x_k <- gate(x_k, y_k - x_k [+ cross terms])``."""
+        gradients, warm start from the previous solve layer), ``x_k <- gate(x_k, y_k - x_k [+ cross terms])``; with
+        ``solve_picard > 0`` the vertex solve is the fixed-point iteration of :meth:`_picard_solve`."""
         top = self.top
         out = list(x)
         L2 = torch.exp((2.0 / top) * ctx.log_vol)                            # (S,)
         store = ctx.resolvent_prev
         for k in degrees:
-            op = physical_hodge(ctx, k, logH_up, logH_dn, tens)
             lam = F.softplus(self.log_lam[str(k)])
             shift = (lam / (L2 if ctx.batch is None else L2[ctx.batch[k]])).view(-1, 1, 1)
             free = dirichlet_free(ctx, k, self.solve_bc)
@@ -2049,14 +2822,20 @@ class RHMPLayer(nn.Module):
             prev = store.get(key) if (self.resolvent_warm_start and store is not None) else None
             if prev is not None and prev.shape != x[k].shape:
                 prev = None
-            y, y_sym, rel, n_it = physical_solve(ctx, k, x[k], op, shift, free, self.solve_iters, self.solve_tol,
-                                                 x0=prev, precond=self.solve_precond,
-                                                 mean_free=(self.solve_bc == "neumann" and k == 0))
+            if self.picard > 0 and k == 0:
+                y, y_sym, rel, n_it, logH_up = self._picard_solve(x, q, ctx, logH_up, logH_dn, tens, shift, free,
+                                                                  prev)
+            else:
+                op = physical_hodge(ctx, k, logH_up, logH_dn, tens)
+                y, y_sym, rel, n_it = physical_solve(ctx, k, x[k], op, shift, free, self.solve_iters,
+                                                     self.solve_tol, x0=prev, precond=self.solve_precond,
+                                                     mean_free=(self.solve_bc == "neumann" and k == 0),
+                                                     lift=(self.solve_bc == "lift"))
             if store is not None:
                 store[key] = y_sym.detach()
             msg = y - x[k]
             if self.cross:
-                if k < top and (k + 1) not in tens:
+                if k < top and (k + 1) not in tens and logH_up[k + 1] is not None:
                     msg = msg + self.wcross[f"up{k}"] * apply_T(block_operands(ctx, k, True, logH_up[k + 1]), x[k + 1])
                 if k > 0:
                     msg = msg + self.wcross[f"dn{k}"] * apply_T(block_operands(ctx, k, False, logH_dn[k - 1]), x[k - 1])
@@ -2065,5 +2844,9 @@ class RHMPLayer(nn.Module):
                 d[f"solve_res{k}"] = rel.detach().float().max()
                 d[f"solve_it{k}"] = torch.tensor(float(n_it))
                 d[f"lam{k}"] = lam.detach().float()
+                if self.picard > 0 and k == 0 and self.last_picard:
+                    d["picard_omega"] = self.last_picard["omega"]
+                    if self.last_picard.get("delta") is not None:
+                        d["picard_delta"] = torch.tensor(self.last_picard["delta"])
             out[k] = self.gates[k](x[k], msg)
         return out

@@ -14,6 +14,12 @@ Hidden cochains (all ``(n_k, B, C)``)::
                    mean over boundary (k-1)-cells of log1p(|x_{k-1}|^2 / C)])         (even, C-dim)
         x_k = o_k ⊙ (1 + e_k)                                                        (odd x even = odd)
 
+With ``cfg.lift_context = p > 0`` the gates ``e_k`` (k >= 1) also see the vertex mean over the cell of a linear
+projection ``P x_0`` (``C -> p``, even), i.e. the vertex quantities of the cell (densities, pressures) modulate the
+lifted odd features channel by channel.  With ``cfg.lift_vertex`` the vertex MLP also sees even vertex invariants of
+the edge inputs: the DEC codifferential (divergence) of the odd edge columns and the vertex means of their squares
+and of the even edge columns.
+
 *Material* columns (``cfg.material_dims[k]``: the last even columns) never enter the lifting: they only feed the
 metric heads (and ``metric_reference``).  ``cfg.lifting='linear'`` drops the geometry, the biases and the even gates
 (``x_0 = W f_0``, ``x_k = o_k``), so the lifting is linear in the field inputs.
@@ -33,7 +39,16 @@ from torch import Tensor, nn
 
 from .layers import LayerContext, _msq, linear, mlp2, spmm_ad
 
-__all__ = ["GeoMLP", "CochainLifting", "input_layout"]
+__all__ = ["GeoMLP", "CochainLifting", "input_layout", "vertex_mean"]
+
+
+def vertex_mean(K: Any, k: int, x0: Tensor) -> Tensor:
+    """Mean over the vertices of every k-cell: ``(n_0, B, H) -> (n_k, B, H)`` (``-1`` padded slots skipped)."""
+    cells = K.cells[k].long()
+    valid = cells >= 0
+    g = x0.index_select(0, cells.clamp_min(0).reshape(-1)).view(cells.shape[0], cells.shape[1], *x0.shape[1:])
+    w = valid.to(x0.dtype) / valid.sum(1, keepdim=True).clamp_min(1).to(x0.dtype)
+    return (g * w.view(*w.shape, *([1] * (x0.dim() - 1)))).sum(1)
 
 
 class GeoMLP(nn.Module):
@@ -124,14 +139,20 @@ class CochainLifting(nn.Module):
         if self.layout[self.top]["conn"] > 0:
             raise ValueError(f"connection columns on the top degree {self.top} have no coboundary")
         C = self.C
+        lay1 = self.layout[1]
+        self.vertex_extra = 0                             # lift_vertex: vertex invariants of the edge inputs
+        if not self.linear and getattr(cfg, "lift_vertex", False):
+            self.vertex_extra = 2 * lay1["O"] + lay1["E_lift"]
         if self.linear:                                   # linear in the field inputs: no geometry, no bias, no gates
             self.lin0 = nn.Linear(self.layout[0]["O"], C, bias=False) if self.layout[0]["O"] > 0 else None
         else:
-            self.mlp0 = GeoMLP(geo_dims[0], self.layout[0]["O"], C, C)
+            self.mlp0 = GeoMLP(geo_dims[0], self.layout[0]["O"] + self.vertex_extra, C, C)
         self.lin_a = nn.ModuleDict()
         self.lin_b = nn.ModuleDict()
         self.lin_conn = nn.ModuleDict()
         self.gate = nn.ModuleDict()
+        self.context = 0 if self.linear else int(getattr(cfg, "lift_context", 0) or 0)
+        self.ctx_proj = nn.Linear(C, self.context) if self.context else None
         for k in range(1, self.top + 1):
             lay = self.layout[k]
             self.lin_a[str(k)] = nn.Linear(C, C, bias=False)
@@ -140,7 +161,7 @@ class CochainLifting(nn.Module):
             if self.layout[k - 1]["conn"] > 0:
                 self.lin_conn[str(k)] = nn.Linear(self.layout[k - 1]["conn"], C, bias=False)
             if not self.linear:
-                n_inv = lay["E_lift"] + (1 if lay["O"] > 0 else 0) + 2
+                n_inv = lay["E_lift"] + (1 if lay["O"] > 0 else 0) + 2 + self.context
                 self.gate[str(k)] = GeoMLP(geo_dims[k], n_inv, int(cfg.lift_hidden), C, zero_last=True)
 
     def forward(self, inputs: dict[int, Tensor], ctx: LayerContext) -> list[Tensor]:
@@ -157,12 +178,15 @@ class CochainLifting(nn.Module):
         B, C, dt = ctx.B, self.C, ctx.dtype
         lay0 = self.layout[0]
         f0 = inputs[0][..., lay0["odd_lo"]:lay0["odd_hi"]] if lay0["O"] > 0 else None
+        if self.vertex_extra:
+            f0 = self._vertex_invariants(inputs, ctx, f0)
         if self.linear:
             x0 = linear(self.lin0, f0).to(dt) if self.lin0 is not None else \
                 torch.zeros(K.n[0], B, C, dtype=dt, device=ctx.log_star[0].device)
         else:
             x0 = self.mlp0(f0, ctx.geo[0]).to(dt)
         xs = [x0.expand(K.n[0], B, C).contiguous()]
+        v0 = linear(self.ctx_proj, xs[0]) if self.ctx_proj is not None else None   # (n0, B, p) vertex context
         for k in range(1, self.top + 1):
             lay = self.layout[k]
             xp = xs[k - 1]
@@ -189,6 +213,30 @@ class CochainLifting(nn.Module):
             feats.append(torch.log1p(_msq(dx)).unsqueeze(-1))
             v = torch.log1p(_msq(xp)).unsqueeze(-1)                                      # (n_{k-1}, B, 1)
             feats.append(spmm_ad(K.d_abs[k - 1], K.dT_abs[k - 1], v) / ctx.bcount[k])
+            if v0 is not None:
+                feats.append(vertex_mean(K, k, v0))
             e = self.gate[str(k)](torch.cat([f.to(dt) for f in feats], dim=-1), ctx.geo[k])
             xs.append(torch.addcmul(o, o, e).to(dt).contiguous())                      # o ⊙ (1 + e)
         return xs
+
+    def _vertex_invariants(self, inputs: dict[int, Tensor], ctx: LayerContext, f0: Tensor | None) -> Tensor:
+        """``[f_0, delta f_1^odd, mean_{e ∋ i} (f_1^odd)^2, mean_{e ∋ i} f_1^even]`` per vertex (``lift_vertex``).
+
+        ``delta f = star_0^{-1} d_0^T (star_1 f)`` is the DEC codifferential (a divergence) of the odd edge columns
+        with the per-graph normalised stars; it and the means of the squares are orientation-invariant, so the vertex
+        features stay even.  Connection and material columns are excluded (``input_layout``).
+        """
+        K, lay1 = ctx.K, self.layout[1]
+        parts = [] if f0 is None else [f0]
+        ones = torch.ones(K.n[1], 1, 1, dtype=ctx.dtype, device=ctx.log_star[0].device)
+        val = spmm_ad(K.dT_abs[0], K.d_abs[0], ones).clamp_min(1.0)                      # (n0, 1, 1) valence
+        F, E, M = lay1["F"], lay1["E"], lay1["M"]
+        if lay1["O"] > 0:
+            fo = inputs[1][..., lay1["odd_lo"]:lay1["odd_hi"]]
+            s1 = torch.exp(ctx.log_star[1]).view(-1, 1, 1).to(fo.dtype)
+            s0 = torch.exp(-ctx.log_star[0]).view(-1, 1, 1).to(fo.dtype)
+            parts.append(s0 * spmm_ad(K.dT[0], K.d[0], (s1 * fo).contiguous()))
+            parts.append(spmm_ad(K.dT_abs[0], K.d_abs[0], fo.square().contiguous()) / val)
+        if lay1["E_lift"] > 0:
+            parts.append(spmm_ad(K.dT_abs[0], K.d_abs[0], inputs[1][..., F - E:F - M].contiguous()) / val)
+        return torch.cat(parts, dim=-1)

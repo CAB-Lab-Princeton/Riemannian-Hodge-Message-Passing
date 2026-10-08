@@ -51,15 +51,19 @@ whose trainable-parameter count is ≥ target. The width is accepted if the coun
 - Widths a model rejects are skipped (GAT needs widths divisible by its 4 heads).
 - Parameter counts come from models built on the `meta` device inside `torch.random.fork_rng`. Matching therefore
   never changes the random initialisation of the final model (tested).
-- Results are cached in `runs/param_match.json` (the release caches: `results/param_match.json`,
-  `results/param_match_baselines.json`).
+- Results are cached in `runs/param_match.json`.
 
 The target is the parameter count of the v2 model on the same task and inputs. That budget is small (the v2 model is
 parameter-efficient: scalar filter coefficients, no per-cell parameters), so `--param-budget` lets any run use another
 budget, e.g. `--param-budget 0.43` for the v1 T6 budget.
 
 **Inputs.** Node-input baselines (all v1 baselines, `ours_v1`, `fno`, `deeponet`) run on the **legacy (v1) inputs**
-where these differ from the native ones (T1, T3, T5, T6, T7, T6_100K). This is exactly the v1 protocol and
+where these differ from the native ones (T1, T1p, T1g, T3, T5, T6, T7, T6_100K, and T2v, whose legacy node features are
+`(f, Vx, Vy, Vz)`; legacy T1p is the periodic
+triangulated grid, every square split along v00-v11, with minimal-image edge vectors supplied by the complex:
+`V1ComplexAdapter.edge_vectors`, used by GaugeEquivCNN, GEM-CNN, SchNet, EGNN, the edge heads and the encoders; legacy
+T1g is the graded periodic grid triangulated the same way, with its true minimal-image edge vectors; FNO works on its
+logical 32 x 32 index grid and, for the zero-shot grids, on the logical grid of the other complex). This is exactly the v1 protocol and
 `scripts/run_baselines.sh` selects it (`MODE=auto`). On all other tasks they read the native inputs through the
 fixed, parameter-free `NodeInputEncoder` (`rhmp/baselines/adapters.py`):
 - node inputs pass through;
@@ -119,8 +123,9 @@ of the T7 inputs `[avg(3), avg·dx(3), avg·dy(3)]`; here EGNN gets the three `a
   - cell-complex models read the target degree's own features, concatenated with incidence means of their other
     degrees (edge heads also get `x_src + x_dst`, `x_dst − x_src`, `ℓ_e`). This is the symmetric **node head**
     (`head='node'`);
-  - **v1 edge protocol** for `mpsn`, `sccnn` and `clifford_smpn` on the v1 paper tasks T1, T2, T3, T5, T6 and T7
-    (the default there, `head='auto'`). v1 never scored these three models on node targets: the v1 training script
+  - **v1 edge protocol** for `mpsn`, `sccnn` and `clifford_smpn` on the original paper tasks T1, T2, T3, T5, T6 and T7
+    (and on T2v, the T2 data with the velocity as an input)
+    and on the periodic T1p (the default there, `head='auto'`). v1 never scored these three models on node targets: the v1 training script
     `formal_benchmark.py` trained them with a 1-channel edge readout on the edge-averaged target `0.5·(y_src + y_dst)`,
     and the v1 evaluation script `compute_all_metrics.py` scored them in **edge space**, keeping only the first target
     component (T3, T7). `rhmp.baselines.registry.prepare_task` applies exactly this transform, and the trainer does so
@@ -129,7 +134,7 @@ of the T7 inputs `[avg(3), avg·dx(3), avg·dy(3)]`; here EGNN gets the three `a
     - the v1 readout reads `x_1`;
     - all metrics (R2, SSIM, Pearson, NRMSE, test100) are edge-space metrics.
 
-    Their paper-task numbers are therefore comparable with the v1 paper tables, **not** with the node-target R2 of the
+    Their paper-task numbers are therefore edge-space numbers (as in the original v1 evaluation), **not** comparable with the node-target R2 of the
     other models. `--model-opts '{"head": "node"}'` gives the node-target version (the default on all other tasks),
     and `'{"v1_components": "all"}'` keeps every target component.
   - MeshGraphNet decodes node latents, or `dec(e_ab) − dec(e_ba)` of the two directed edge latents for odd edge
@@ -163,13 +168,17 @@ at the larger v1 widths). A like-for-like timing of the unmodified v1 modules is
 | MPSN, SCCNN, Clifford | edge readout on edge-averaged targets, edge-space metrics, first component | **paper tasks: identical (v1 edge protocol).** Other tasks: node head on the task target | `head='node'` / `'v1_edge'` |
 | DeepONet | global mean over all nodes of the batch | per-mesh mean in block-diagonal batches | — |
 
+Option (not v1, off by default): `gem_cnn` with `--model-opts '{"radial": true}'` scales the messages of layer `l` by
+`1 + r_l(log |e|)` (MLP 1-16-L, last layer zero-initialised), i.e. kernels that also depend on the edge length; GEM-CNN
+and GaugeEquivCNN otherwise use the edge directions only.  Used as an extra control on the graded grid (T1g).
+
 **SCCNN initialisation.** Normalised Laplacians combined with the `N(0, 0.1)` filter coefficients of v1 make SCCNN
 collapse, which is why the default above also initialises the filters as identity.
 - With these coefficients the identity term of the filter shrinks the signal ~10× per layer. After four layers only
   the biases remain: prediction spread 1e-6, gradients on the early layers 1e-10.
 - The model then predicts a constant (T6 and T3 100-epoch runs: val R2 −0.0004).
 - `test_sccnn_normalised_needs_identity_init` and `test_trainable_on_learnable_tiny_task` guard against this.
-- All SCCNN results in REPORT.md use the defaults above.
+- All reported SCCNN results use the defaults above.
 - 3-epoch check on T6 legacy, val R2 at epoch 3:
 
   | variant | val R2 (epoch 3) |
@@ -255,7 +264,7 @@ Reading the table:
   everywhere else they carry the node head.
 - The v2 family is not matched: it is the same architecture, and the frozen metric heads of `dec_fixed` /
   `unit_fixed` do not count as trainable.
-- `ours_v1` is the v1 paper configuration, 4-5× the v2 budget; its per-cell metric bases account for most of it.
+- `ours_v1` is the configuration of the original v1 implementation, 4-5× the v2 budget; its per-cell metric bases account for most of it.
 - Every matched entry is within [1, 1.2] × target.
 - MeshGraphNet prefers widths divisible by 4. Such widths are ~1.8× faster than e.g. 30 because of kernel
   alignment; single steps are used only when no multiple of 4 meets the tolerance.
@@ -271,10 +280,10 @@ Reading the table:
 - every model waits for an exclusive GPU (RTX PRO 6000 Blackwell); `exclusive=False` marks rows during which
   another process appeared.
 
-The v2 rows are measured in the same process under the same conditions. They agree with `bench/RESULTS_step.md`:
-T6 v2 native 60.7 ms / 17.9 ms / 4.52 GB there; HP_k100 block8 ≈ 38 ms per 8-mesh step (210 samples/s).
+The v2 rows are measured in the same process under the same conditions (HP_k100 block8 ≈ 38 ms per 8-mesh step,
+210 samples/s).
 
-**T6, B = 64 (shared mesh), exclusive GPU, fp32 with TF32 matmuls** (`results/benchmarks/baselines_T6.json`):
+**T6, B = 64 (shared mesh), exclusive GPU, fp32 with TF32 matmuls**:
 
 | model | inputs | params | width × L | train ms | infer ms | peak GB |
 |---|---|---:|---|---:|---:|---:|
@@ -282,7 +291,7 @@ T6 v2 native 60.7 ms / 17.9 ms / 4.52 GB there; HP_k100 block8 ≈ 38 ms per 8-m
 | `dec_fixed` | native | 68.7K | 128 × 4 | 60.0 | 17.9 | 4.51 |
 | **`mgn`** | native | 85.2K | 24 × 15 | **29.8** | 10.9 | 3.49 |
 | `mgn_fast` (H = 30, a width that is not a multiple of 4) | native | 73.1K | 30 × 8 | 33.9 | 20.1 | 2.48 |
-| `ours_v1` (v1 paper model; per-sample evaluation) | legacy | 433.5K | 128 | 104.9 | 937.4 | 7.48 |
+| `ours_v1` (original v1 model; per-sample evaluation) | legacy | 433.5K | 128 | 104.9 | 937.4 | 7.48 |
 | `gcn` | legacy | 90.1K | 172 × 4 | 1.7 | 0.5 | 0.76 |
 | `gat` | legacy | 92.2K | 172 × 4 | 15.8 | 4.8 | 3.56 |
 | `schnet` | legacy | 95.8K | 104 × 4 | 8.5 | 2.5 | 2.05 |
@@ -295,7 +304,7 @@ T6 v2 native 60.7 ms / 17.9 ms / 4.52 GB there; HP_k100 block8 ≈ 38 ms per 8-m
 | `clifford_smpn` | legacy | 96.0K | 72 × 4 | 28.7 | 7.7 | 1.66 |
 | `deeponet` | legacy | 93.0K | 184 | 0.9 | 0.2 | 0.34 |
 
-**T6, B = 64, bf16 AMP** (`--amp`, `results/benchmarks/baselines_T6_amp.json`):
+**T6, B = 64, bf16 AMP** (`--amp`):
 
 | model | width × L | train ms | infer ms | peak GB |
 |---|---|---:|---:|---:|
@@ -317,8 +326,8 @@ About these measurements:
 - On block-diagonal batches of small meshes (B = 1, ~70K directed edges × 25 channels), the 15 MeshGraphNet blocks
   (~70 kernels each per training step) are launch/dispatch-bound and slower than the 4 layers of the v2 model. During
   this measurement the 8 CPUs of the benchmark machine were at load ≈ 15, which slows eager dispatch. Inductor would
-  fuse these kernels, but `torch.compile` with Inductor was unavailable on that machine (no `Python.h`; see
-  `bench/RESULTS_step.md`). MeshGraphNet compiles cleanly with the `aot_eager` backend (no graph break in the
+  fuse these kernels, but `torch.compile` with Inductor was unavailable on that machine (no `Python.h`).
+  MeshGraphNet compiles cleanly with the `aot_eager` backend (no graph break in the
   processor; tested).
 - The MeshGraphNet rows were measured with an earlier input encoding, without the node vector field and the `v·t`
   edge features. The default encoding changes only the input width of the encoders (T6: node 1 → 2, edge 4 → 6
@@ -349,15 +358,13 @@ Applicable, with a caveat:
 
 ## 7. Results
 
-The 100-epoch results of the baselines (T6 and T3 with legacy and native inputs, HP_k100 with zero-shot 4x resolution,
-SURF with geometry and topology transfer, T8; v2 and v1 parameter budgets) are in [REPORT.md](../REPORT.md) §6.5 and
-[results/RESULTS.md](../results/RESULTS.md) §6; the run files are in `results/baselines/`,
-`results/baselines_v1_budget/` and `results/baseline_diagnostics/`.  Two observations from the runs:
+The 100-epoch baseline runs of the paper (all seven tasks, seeds 42, 1 and 2) are in `results/` and summarised in
+[results/RESULTS.md](../results/RESULTS.md).  Two observations from the baseline runs:
 
 - **The GAT budget.** Budget-matched GAT (width 172, 92K parameters) reaches test R2 0.513 on T6 legacy after 100
   epochs; the v1 table reports 0.703.  There is no code difference (fidelity-tested).  v1 matched GAT to its own 0.433M
   model: width 296, 445K parameters counted, 269K of them used (the other 176K are in the unused edge MLP).  At the v1
-  width (`--model-opts '{"hidden": 296}'`, `results/baseline_diagnostics/T6_gat_v1width_e100`) GAT learns faster, and with
+  width (`--model-opts '{"hidden": 296}'`) GAT learns faster, and with
   the v1 budget (`--param-budget 0.43`) it reaches 0.636.  The gap is a budget effect, not a protocol change.
 - **T6 is slow to start for every non-structural baseline**, while the physics-prior controls are fast: after 2
   epochs `rhmp` 0.9975, `unit_star` 0.988, `dec_fixed` 0.984, `unit_fixed` 0.965 (validation R2), i.e. both the DEC

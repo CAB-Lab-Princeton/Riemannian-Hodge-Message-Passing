@@ -7,6 +7,6 @@ granted beyond what applicable law allows.
 The vendored v1 code in `rhmp/baselines/v1/` comes from the RHMP v1 code base,
 https://github.com/ContinuumCoder/Riemannian-Hodge-Message-Passing, and is subject to the terms of that repository.
 
-The datasets are not part of this repository.  The v1 paper datasets are distributed through OSF (see
+The datasets are not part of this repository.  The original data sets of the paper are distributed through OSF (see
 [datasets/README.md](datasets/README.md)); T1 is derived from PDEBench and T8 from AirfRANS, under their respective
 terms.

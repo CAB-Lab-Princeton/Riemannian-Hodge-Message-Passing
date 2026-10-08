@@ -46,12 +46,14 @@ __all__ = ["ModelSpec", "MODELS", "SPECS", "applicable", "build_model", "model_n
 # (v1 gave EGNN only these; v1 formal_benchmark.py)
 LEGACY_SCALAR_COLUMNS = {"T6": [0], "T6_100K": [0], "T7": [0, 1, 2]}
 # paper tasks whose legacy (v1) inputs differ from the native ones: node-input baselines default to legacy there
-LEGACY_TASKS = ("T1", "T3", "T5", "T6", "T7", "T6_100K")
+LEGACY_TASKS = ("T1", "T1p", "T1pm", "T1pml", "T1pf", "T1pmf", "T1pmlf", "T1g", "T1gml", "T2v", "T2a", "T3", "T5", "T6",
+                "T7", "T6_100K")
 # v1 edge protocol (v1 formal_benchmark.py + compute_all_metrics.py): MPSN / SCCNN / Clifford-SMPN were
 # trained with a 1-channel edge readout on the edge-averaged node target 0.5 (y_src + y_dst) and scored in edge space
 # (first target component).  Default for these models on the shared-mesh paper tasks v1 reported them on.
 V1_EDGE_MODELS = ("mpsn", "sccnn", "clifford_smpn")
-V1_EDGE_TASKS = ("T1", "T2", "T3", "T5", "T6", "T7")
+V1_EDGE_TASKS = ("T1", "T1p", "T1pm", "T1pml", "T1pf", "T1pmf", "T1pmlf", "T1g", "T1gml", "T2", "T2v", "T2a", "T3",
+                 "T5", "T6", "T7")
 
 
 @dataclass
@@ -211,7 +213,7 @@ def _build_rhmp_family(name: str):
 def _build_v1(name: str):
     def build(td, target_params=None, *, hidden=None, n_layers=4, geometry="normalized", v1_exact=False,
               normalize=None, filter_init=None, head="auto", v1_components="first", invariant_inputs=None,
-              amp=False, tol=V1_TOL, cache_path=DEFAULT_CACHE, **_):
+              amp=False, tol=V1_TOL, cache_path=DEFAULT_CACHE, radial=False, **_):
         from .v1_wrappers import make_v1_baseline
         io = task_io(td)
         directional, cols = True, None
@@ -231,6 +233,8 @@ def _build_v1(name: str):
             filter_init = "identity" if normalize else "v1"
         kw = dict(n_layers=n_layers, geometry=geometry, v1_exact=v1_exact, normalize=normalize,
                   filter_init=filter_init, head=head_mode, directional=directional, node_columns=cols, amp=amp)
+        if radial:                                       # GEM-CNN with edge-length dependent kernels (not v1)
+            kw["radial"] = True
 
         def make(h):
             return make_v1_baseline(name, io, h, **kw)
@@ -271,7 +275,7 @@ def _build_ours_v1(td, target_params=None, *, C=None, eval_per_sample=True, amp=
     io = task_io(td)
     C = int(C or td.meta.get("v1_C", 128))
     model = make_ours_v1(io, C, eval_per_sample=eval_per_sample, amp=amp)
-    return _finish(model, td, "ours_v1", {"matched": False, "note": "v1 paper configuration"}, target_params)
+    return _finish(model, td, "ours_v1", {"matched": False, "note": "original v1 configuration"}, target_params)
 
 
 def _build_deeponet(td, target_params=None, *, hidden=None, n_basis=64, amp=False, tol=V1_TOL,
@@ -365,8 +369,24 @@ def prepare_task(name: str, td: Any, opts: dict | None = None) -> Any:
     desc = (f"v1 edge protocol: target 0.5 (y_src + y_dst) on the {td.K.n[1]} edges"
             + (", first component" if comps == "first" and td.out_dim > 1 else "") + "; edge-space metrics")
     meta = dict(td.meta, r2_std=r2s, v1_edge_protocol=desc, untransformed=td)
+    extra = {}
+    for key, src in (td.extra_tests or {}).items():   # extra test sets: the same protocol on their edges
+        if isinstance(src.get("inputs"), dict) and not isinstance(src.get("K"), (list, tuple)):
+            ez = src["K"].cells[1].long().to(src["target"].device)                # one shared complex, (N, n0, O)
+            yz = src["target"]
+            yze = 0.5 * (yz.index_select(1, ez[:, 0]) + yz.index_select(1, ez[:, 1]))
+            extra[key] = dict(src, target=(yze[..., :1] if comps == "first" else yze).contiguous(), output_map=None)
+        elif isinstance(src.get("K"), (list, tuple)):                             # lists of meshes, (n0, O) each
+            ts = []
+            for Kx, y_x in zip(src["K"], src["target"]):
+                ex = Kx.cells[1].long().to(y_x.device)
+                t = 0.5 * (y_x.index_select(0, ex[:, 0]) + y_x.index_select(0, ex[:, 1]))
+                ts.append((t[..., :1] if comps == "first" and t.shape[-1] > 1 else t).contiguous())
+            extra[key] = dict(src, target=ts)
+        else:
+            extra[key] = src
     return dataclasses.replace(td, target=ye.contiguous(), target_degree=1, target_kind="even",
-                               out_dim=int(ye.shape[-1]), y_stats=ys, meta=meta, output_map=None)
+                               out_dim=int(ye.shape[-1]), y_stats=ys, meta=meta, output_map=None, extra_tests=extra)
 
 
 MODELS: dict[str, Callable[..., nn.Module]] = {
@@ -499,7 +519,7 @@ MAX_WAIT_S = [1800.0]      # --max-wait (0: measure on a shared GPU without wait
 
 
 def _wait_exclusive(max_wait_s: float | None = None, poll_s: float = 10.0) -> bool:
-    """Block until the GPU runs no other compute process (as ``bench/step_bench.py``); False after ``max_wait_s``."""
+    """Block until the GPU runs no other compute process; False after ``max_wait_s``."""
     max_wait_s = MAX_WAIT_S[0] if max_wait_s is None else max_wait_s
     t0 = time.time()
     while True:

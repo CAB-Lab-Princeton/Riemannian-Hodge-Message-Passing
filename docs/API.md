@@ -1,6 +1,6 @@
 # RHMP v2 API reference
 
-Rendered by `python3 docs/gen_api.py` from the docstrings of `rhmp` 2.0.0 (torch 2.10.0+cu128).
+Rendered by `python3 docs/gen_api.py` from the docstrings of `rhmp` 2.1.0 (torch 2.11.0).
 Do not edit by hand; regenerate after changing public docstrings.  Conventions used throughout: cochain
 features have the layout `(n_k, B, C)` (cells of degree k, samples sharing the complex, channels); a
 block-diagonal batch of different meshes has `B = 1` and `K.batch[k]` holds the graph id of every k-cell.
@@ -13,20 +13,26 @@ the tutorial is `docs/TUTORIAL.md`, the mathematics `docs/MATH.md`.
 - [Package (`rhmp`)](#package-rhmp)
 - [Cochain complexes (`rhmp.complex`)](#cochain-complexes-rhmpcomplex): `class CochainComplex`, `validate_triangles`, `batch_complexes`
 - [Model (`rhmp.model`)](#model-rhmpmodel): `class RHMPConfig`, `class RHMP`
-- [DEC toolkit (`rhmp.dec`)](#dec-toolkit-rhmpdec): `whitney_blocks`, `apply_whitney_metric`, `whitney_rowsum_abs`, `assemble_whitney_metric`, `cg_solve`, `cg_solve_implicit`, `hodge_laplacian`, `hodge_decompose`, `harmonic_basis`, `sharp`, `flat`
-- [Geometry (`rhmp.geometry`)](#geometry-rhmpgeometry): `face_measures`, `surface_geometry`, `volume_geometry`, `barycentric_gradients`, `whitney1_values`, `whitney2_values_tet`, `galerkin_blocks`, `whitney_triangles`, `whitney_tets`
+- [DEC toolkit (`rhmp.dec`)](#dec-toolkit-rhmpdec): `whitney_blocks`, `apply_whitney_metric`, `whitney_rowsum_abs`, `assemble_whitney_metric`, `cg_solve`, `cg_solve_implicit`, `hodge_laplacian`, `hodge_decompose`, `harmonic_basis`, `cohomology_generators`, `harmonic_generators`, `top_measure`, `top_aspect`, `whitney_energy`, ...
+- [Geometry (`rhmp.geometry`)](#geometry-rhmpgeometry): `min_image`, `local_cell_positions`, `face_measures`, `surface_geometry`, `volume_geometry`, `barycentric_gradients`, `whitney1_values`, `whitney2_values_tet`, `galerkin_blocks`, `whitney_triangles`, `whitney_tets`
 - [Sparse and segment operations (`rhmp.ops`)](#sparse-and-segment-operations-rhmpops): `spmm`, `sparse_csr`, `csr_from_coo`, `csr_with_values`, `gather_apply`, `scatter_apply`, `gershgorin_bound`, `beta_unit`, `broadcast_to_cells`, `segment_sum`, `segment_mean`, `segment_max`, `power_iteration_norm`, `to_nbc`, ...
 - [Data containers (`rhmp.data`)](#data-containers-rhmpdata): `class Stats`, `class OutputMap`, `class TaskData`, `sequential_split`, `holdout_split`, `feature_stats`, `scale_stats`, `edge_alignment`, `cell_alignment`, `shared_minibatch`, `mesh_minibatch`, `iterate_indices`, `concat_cells`, `same_device`, ...
 - [Metrics (`rhmp.metrics`)](#metrics-rhmpmetrics): `r2_score`, `mse`, `mae`, `nrmse`, `ssim_pearson`, `summarize`, `unnormalize`, `flatten_ragged`
-- [Trainer (`rhmp.train`)](#trainer-rhmptrain): `parse_args`, `run`, `build_config`, `model_output`, `batch_loss`, `pde_residual`, `predict`, `evaluate`, `main`
+- [Trainer (`rhmp.train`)](#trainer-rhmptrain): `parse_args`, `run`, `build_config`, `model_output`, `batch_loss`, `pde_residual`, `predict`, `evaluate`, `needs_whitney`, `main`
 - [Task registry (`rhmp.tasks`)](#task-registry-rhmptasks): `load_task`, `list_tasks`, `task_defaults`, `resolve_root`
+- [Torus transport task (`rhmp.tasks.torus`)](#torus-transport-task-rhmptaskstorus): `t2a_file`, `t2a_inputs`, `t2a_complex`, `load_T2a`
+- [Magnetostatics tasks (`rhmp.tasks.maxwell`)](#magnetostatics-tasks-rhmptasksmaxwell): `mxs_task_defaults`, `class FluxToNodeField`, `reluctivity`, `load_mxs`, `load_mxe`, `load_mxa`, `face_onehot`, `triangle_areas`, `edge_directions`, `rotate_frame_columns`
+- [AirfRANS tasks (`rhmp.tasks.airfrans`)](#airfrans-tasks-rhmptasksairfrans): `airfrans_task_defaults`, `class StarAverageMap`, `class FluxVelocityMap`, `class OffsetMap`, `wall_vertices`, `afm_eval_source`, `afp_output_map`, `load_t8_inflow`, `potential_reference`, `load_t8res`, `load_t8_frame`, `load_afm`, `flux_divergence`, `trapezoid_flux`, ...
+- [Anisotropy task suite (`rhmp.tasks.aniso`)](#anisotropy-task-suite-rhmptasksaniso): `aniso_task_defaults`, `parse_name`, `load_aniso`, `structure_metrics`, `cell_tensors`
 - [Extension task suite (`rhmp.tasks.suite`)](#extension-task-suite-rhmptaskssuite): `suite_task_defaults`, `load_surf`, `load_dyn`, `load_dynfix`, `load_qual`, `rollout_eval`, `surf_integral_error`, `mass_weighted_errors`, `mass_inverse_map`, `mass_div_readout_available`
+- [Robustness (`rhmp.robustness`)](#robustness-rhmprobustness): `remap_complex`, `transformed_task`, `gauge_task`, `noise_task`, `random_rotation`, `robustness_table`
 - [Baselines (`rhmp.baselines`)](#baselines-rhmpbaselines)
 - [Baseline registry (`rhmp.baselines.registry`)](#baseline-registry-rhmpbaselinesregistry): `class ModelSpec`, `applicable`, `build_model`, `model_names`, `rhmp_param_count`, `default_mode`, `from_checkpoint`, `prepare_task`, `resolve_head`, `main`
 - [Building blocks: layers (`rhmp.layers`)](#building-blocks-layers-rhmplayers): `class LayerContext`, `class BlockGeometry`, `make_context`, `class RadialGate`, `class RHMPLayer`, `class BlockOperands`, `block_operands`, `apply_L`, `apply_T`, `poly_block`, `poly_block_reference`, `spmm_ad`, `class SharedCoboundaries`, `mean_square`, ...
+- [Building blocks: transport term (`rhmp.transport`)](#building-blocks-transport-term-rhmptransport): `normalize_transport`, `class TransportTerm`, `transport_columns`, `transport_weights`, `apply_transport`, `transport_bound`
 - [Building blocks: metric heads (`rhmp.metric`)](#building-blocks-metric-heads-rhmpmetric): `class MetricHead`, `class TensorMetricHead`, `metric_feature_dim`
-- [Building blocks: lifting (`rhmp.lifting`)](#building-blocks-lifting-rhmplifting): `class GeoMLP`, `class CochainLifting`, `input_layout`
-- [Building blocks: readouts (`rhmp.readout`)](#building-blocks-readouts-rhmpreadout): `class NodeScalarReadout`, `class CochainReadout`, `class EvenCellReadout`, `class NodeVectorReadout`, `class GradReadout`, `class CurlReadout`, `class DivReadout`, `class MassDivReadout`, `build_readout`, `parse_readout`, `readout_degrees`, `vector_geometry`, `ls_solve`
+- [Building blocks: lifting (`rhmp.lifting`)](#building-blocks-lifting-rhmplifting): `class GeoMLP`, `class CochainLifting`, `input_layout`, `vertex_mean`
+- [Building blocks: readouts (`rhmp.readout`)](#building-blocks-readouts-rhmpreadout): `class NodeScalarReadout`, `class CochainReadout`, `class EvenCellReadout`, `class NodeVectorReadout`, `class GradReadout`, `class CurlReadout`, `class DivReadout`, `class MassDivReadout`, `build_readout`, `parse_readout`, `readout_degrees`, `vector_geometry`, `ls_solve`, `face_wedge`
 - [Registries](#registries-generated-from-the-code)
 - [Trainer CLI](#trainer-cli-python--m-rhmptrain---help)
 
@@ -58,7 +64,7 @@ Public API (names are resolved lazily, so that each one imports only its own sub
 - `rhmp.load_task`: re-export of `rhmp.tasks.load_task` (documented there).
 ### Constants
 
-- `__version__`: '2.0.0'
+- `__version__`: '2.1.0'
 
 
 ## Cochain complexes: `rhmp.complex`
@@ -127,7 +133,7 @@ Oriented cochain complex with CSR coboundaries, reference stars and E(n)-invaria
 | `boundary` | `list[Tensor]` | required | `boundary[k] (n_k,)` bool. |
 | `batch` | `list[Tensor] \| None` | required | `batch[k] (n_k,)` int64 sample id per cell for block-diagonal batches, else `None`. |
 | `num_graphs` | `int` | required | number of samples (meshes) in the complex. |
-| `meta` | `dict` | required | extra info: `cell_type, star_type, geo_features, sizes, ptr, validation, face_index, geometry_stats, build_time_s`; `face_edges (n2, m)` edge ids of every face in cyclic order (edge j joins vertex j and j+1 of `cells[2]`; -1 padded) with `face_edge_signs` (+-1, 0 pad); tets: `tet_faces (n3, 4)` (face i omits local vertex i) with `tet_face_signs`; polygons: `face_lengths (n2,)`; grids: `grid_shape`, `spacing`, `diagonal`; `beta_unit`: per-graph `(num_graphs,)` Gershgorin bounds of `S^{-1/2} A^T A S^{-1/2}` with keys `'up{k}_dec'` (A = d_k, S = star_k), `'up{k}_none'` (S = 1), `'down{k}_dec'` (A = d_{k-1}^T, S = 1/star_k), `'down{k}_none'`. |
+| `meta` | `dict` | required | extra info: `cell_type, star_type, geo_features, sizes, ptr, validation, face_index, geometry_stats, build_time_s`; `geo_log_median`: per degree `(num_graphs, G_k)` float64 log medians behind the relative descriptor columns (`rhmp.geometry.GEO_RELATIVE_COLUMNS`; 0 elsewhere); `face_edges (n2, m)` edge ids of every face in cyclic order (edge j joins vertex j and j+1 of `cells[2]`; -1 padded) with `face_edge_signs` (+-1, 0 pad); tets: `tet_faces (n3, 4)` (face i omits local vertex i) with `tet_face_signs`; polygons: `face_lengths (n2,)`; grids: `grid_shape`, `spacing`, `diagonal`; `beta_unit`: per-graph `(num_graphs,)` Gershgorin bounds of `S^{-1/2} A^T A S^{-1/2}` with keys `'up{k}_dec'` (A = d_k, S = star_k), `'up{k}_none'` (S = 1), `'down{k}_dec'` (A = d_{k-1}^T, S = 1/star_k), `'down{k}_none'`. Optional, set by a task and concatenated by `batch` when every part has them as dicts: `dirichlet = {k: (n_k,) bool}` (fixed cells of solve / projection layers; default: the boundary cells) and `cohomology = {k: (n_k, r)}` (closed k-cochains generating `H^k`, e.g. `rhmp.dec.cohomology_generators`; parts with fewer generators are padded with zero columns). |
 | `whitney` | `dict` | `{}` | `{k: dict}` precomputed Whitney/Galerkin metric blocks of degree k (simplicial complexes only: k=1 for triangles, k=1 and 2 for tets; see `rhmp.geometry.whitney_triangles` / `rhmp.geometry.whitney_tets` and `rhmp.dec`), plus CSR `gather ((m_k n_top), n_k)` and `scatter (n_k, (m_k n_top))` maps between k-cells and per-top-cell slots (slot-major rows). |
 
 <details><summary>docstring</summary>
@@ -149,13 +155,18 @@ Fields (``K`` = top degree ``dim``):
         :func:`rhmp.geometry.whitney_tets` and :mod:`rhmp.dec`), plus CSR ``gather ((m_k n_top), n_k)`` and
         ``scatter (n_k, (m_k n_top))`` maps between k-cells and per-top-cell slots (slot-major rows).
     meta: extra info: ``cell_type, star_type, geo_features, sizes, ptr, validation, face_index,
-        geometry_stats, build_time_s``; ``face_edges (n2, m)`` edge ids of every face in cyclic order
+        geometry_stats, build_time_s``; ``geo_log_median``: per degree ``(num_graphs, G_k)`` float64 log medians
+        behind the relative descriptor columns (``rhmp.geometry.GEO_RELATIVE_COLUMNS``; 0 elsewhere);
+        ``face_edges (n2, m)`` edge ids of every face in cyclic order
         (edge j joins vertex j and j+1 of ``cells[2]``; -1 padded) with ``face_edge_signs`` (+-1, 0 pad);
         tets: ``tet_faces (n3, 4)`` (face i omits local vertex i) with ``tet_face_signs``; polygons:
         ``face_lengths (n2,)``; grids: ``grid_shape``, ``spacing``, ``diagonal``; ``beta_unit``: per-graph
         ``(num_graphs,)`` Gershgorin bounds of ``S^{-1/2} A^T A S^{-1/2}`` with keys ``'up{k}_dec'``
         (A = d_k, S = star_k), ``'up{k}_none'`` (S = 1), ``'down{k}_dec'`` (A = d_{k-1}^T, S = 1/star_k),
-        ``'down{k}_none'``.
+        ``'down{k}_none'``.  Optional, set by a task and concatenated by ``batch`` when every part has them as
+        dicts: ``dirichlet = {k: (n_k,) bool}`` (fixed cells of solve / projection layers; default: the boundary
+        cells) and ``cohomology = {k: (n_k, r)}`` (closed k-cochains generating ``H^k``, e.g.
+        :func:`rhmp.dec.cohomology_generators`; parts with fewer generators are padded with zero columns).
 ```
 
 </details>
@@ -276,7 +287,24 @@ apply_dT_abs(k: int, x: Tensor) -> Tensor
 ```python
 edge_vectors() -> Tensor
 ```
-`(n1, D)` edge vectors `pos[dst] - pos[src]` (E(n)-equivariant).
+`(n1, D)` edge vectors `pos[dst] - pos[src]` (E(n)-equivariant); on a periodic complex (`meta['period']`) their minimal images (block-diagonal batches with periodic parts store them in `meta['edge_vectors']`).
+
+#### `CochainComplex.cell_positions`
+
+```python
+cell_positions(k: int) -> Tensor
+```
+Vertex positions of the k-cells, `(n_k, m, D)` (`-1` padded slots repeat the first vertex).
+
+<details><summary>docstring</summary>
+
+```text
+On a periodic complex every cell is given in its own unwrapped frame (first vertex plus the minimal images of
+the others, :func:`rhmp.geometry.local_cell_positions`); use this instead of ``pos[cells[k]]`` for anything
+geometric (signed areas, barycentric gradients).
+```
+
+</details>
 
 #### `CochainComplex.check_d2`
 
@@ -295,6 +323,7 @@ from_triangles(
     star: str = 'cotan',
     validate: bool = True,
     device=None,
+    period=None,
 ) -> CochainComplex
 ```
 Triangle mesh (planar 2-D or surface in 3-D; boundaries and non-manifold edges allowed).
@@ -310,6 +339,9 @@ Args:
         ``meta['face_index']`` maps kept faces to input rows).  With ``False`` faces with repeated
         vertices raise.
     device: target device (default: device of ``pos`` if a tensor, else CPU).
+    period: ``None`` or the axis-aligned periods ``(L_x, L_y[, L_z])`` of a flat torus: faces may wrap around
+        and all geometry is intrinsic to the torus (minimal-image edge vectors, every face measured in its
+        own unwrapped frame; ``meta['period']``).
 Returns:
     :class:`CochainComplex` with ``dim = 2``.
 ```
@@ -326,6 +358,7 @@ from_polygons(
     star: str = 'barycentric',
     validate: bool = True,
     device=None,
+    period=None,
 ) -> CochainComplex
 ```
 Polygonal (CW) 2-complex: quads, mixed polygons, triangles.
@@ -341,6 +374,7 @@ Args:
         edges on polygons = circumcentric on rectangles) | ``'unit'``.
     validate: drop polygons with < 3 vertices, repeated vertices, zero area, duplicates (warning).
     device: target device.
+    period: ``None`` or the axis periods of a flat torus (periodic complex, see :meth:`from_triangles`).
 Returns:
     :class:`CochainComplex` with ``dim = 2`` and ``cells[2]`` of shape ``(n2, M)`` (``-1`` padded);
     ``d[1]`` rows list the boundary edges in cyclic order with orientation signs.
@@ -389,8 +423,9 @@ from_grid(
     *,
     cell: str = 'quad',
     star: str | None = None,
-    diagonal: str = 'v1',
+    diagonal: str | None = None,
     device=None,
+    periodic: bool = False,
 ) -> CochainComplex
 ```
 Regular 2-D grid with `nx * ny` vertices, vertex id `i * ny + j` at `(i*sx, j*sy)`.
@@ -403,16 +438,21 @@ loader ``build_regular_grid`` used for T1), so per-vertex data stored as
 ``field[ix, iy].reshape(-1)`` lines up.
 
 Args:
-    shape: ``(nx, ny)`` vertices per axis (>= 2 each).
+    shape: ``(nx, ny)`` vertices per axis (>= 2 each; >= 3 for ``periodic``).
     spacing: ``h`` or ``(sx, sy)``.  ``from_grid((32, 32), 1/31, cell='tri')`` reproduces T1.
     cell: ``'quad'`` (CCW quads ``[v00, v10, v11, v01]``) or ``'tri'``.
     star: default ``'cotan'`` for triangles, ``'barycentric'`` for quads (identical on rectangles).
-    diagonal: triangle split for ``cell='tri'``: ``'v1'`` (default) = scipy/qhull Delaunay of the
-        ``linspace(0, 1, n)`` grid exactly as v1 built T1 (degenerate cocircular squares ->
+    diagonal: triangle split for ``cell='tri'``: ``'v1'`` (default without ``periodic``) = scipy/qhull
+        Delaunay of the ``linspace(0, 1, n)`` grid exactly as v1 built T1 (degenerate cocircular squares ->
         qhull-chosen diagonals; verified identical to the T1 faces with scipy 1.17), faces made
-        CCW; ``'main'`` (v00-v11), ``'anti'`` (v10-v01), ``'alternate'`` (checkerboard) are
-        deterministic and need no scipy.
+        CCW; ``'main'`` (v00-v11; default with ``periodic``), ``'anti'`` (v10-v01), ``'alternate'``
+        (checkerboard) are deterministic and need no scipy.
     device: target device.
+    periodic: flat torus of size ``(nx sx) x (ny sy)``: the cells of the squares ``(i, j)``, ``i < nx``,
+        ``j < ny``, join vertex ``(i, j)`` to ``((i + 1) % nx, (j + 1) % ny)`` (wrap-around edges and faces),
+        all cells are congruent and the geometry is intrinsic (minimal-image edge vectors, cells measured in
+        their own unwrapped frames; ``meta['period'] = (nx sx, ny sy)``).  Euler characteristic 0, Betti
+        numbers ``(1, 2, 1)``, no boundary.
 Returns:
     :class:`CochainComplex` (``cell_type`` ``'quad'`` or ``'triangle'``) with ``meta['grid_shape']``.
 ```
@@ -552,6 +592,32 @@ RHMPConfig(
     tensor_param: str = 'full',
     solve_precond: str = 'none',
     readout_head: str = 'mlp',
+    term_gates: bool = False,
+    cochain_head: str = 'linear',
+    readout_hidden: int = 16,
+    amplitude_dims: dict[int, int] = {},
+    lift_context: int = 0,
+    lift_vertex: bool = False,
+    readout_layers: str = 'last',
+    readout_depth: int = 1,
+    readout_skip: bool = False,
+    readout_spatial: bool = False,
+    readout_wedge: int = 0,
+    frozen_units: bool = False,
+    frozen_descriptors: bool | str = True,
+    amplitude_power: int = 1,
+    amplitude_energy: bool = False,
+    readout_energy: int = 0,
+    readout_energy_clip: float = 0.0,
+    project_harmonic: bool = True,
+    kutta_range: float = 8.0,
+    project_solver: str = 'cg',
+    kutta_corner: float = 0.0,
+    transport: dict = {},
+    solve_picard: int = 0,
+    picard_relax: float = 0.5,
+    metric_geo: bool = True,
+    picard_init: str = 'zero',
 )
 ```
 Hyper-parameters of `RHMP`.
@@ -569,7 +635,7 @@ Hyper-parameters of `RHMP`.
 | `tie_metrics` | `bool` | `True` | one metric per degree (up uses `H_m`, down uses `1/H_m`) vs. separate up/down heads. |
 | `scaling` | `str` | `'dec'` | `'dec' \| 'jacobi' \| 'none'` operator scaling. |
 | `cross` | `bool` | `True` | cross-degree transport terms. |
-| `gate` | `str` | `'norm'` | `'norm'` (radial gate), `'relu'` (ablation) or `'none'` (no nonlinearity; used by `solver_preset`). |
+| `gate` | `str` | `'norm'` | `'norm'` (radial gate), `'relu'` (ablation), `'none'` (no nonlinearity; used by `solver_preset`) or `'homog'` (gate homogeneous of degree one in the field amplitude: `x + gamma g(xi) m` with scale-invariant invariants `xi`, see `rhmp.layers.RadialGate`). |
 | `identity_metric` | `bool` | `False` | every metric `H = 1` (ablation of the learned metric, DESIGN §3.2): no learned correction and no reference star inside `H`. With `scaling='dec'` the blocks still carry the DEC stars of their own degree through the symmetric scaling `S` (`S_up = star_k`, `S_down = 1/star_k`), so the geometric (physics) prior survives at that level; the fully combinatorial variant builds the complex with `star='unit'` (all reference stars 1) or uses `scaling='none'`. The default model is the pure DEC operator (`H = star`) at initialisation. |
 | `readout` | `str` | `'node_scalar'` | `'node_scalar' \| 'node_vector' \| 'cochain:k' \| 'even:k' \| 'grad' \| 'curl' \| 'div' \| 'div:k' \| 'mdiv' \| 'mdiv:k'` (see `rhmp.readout`; `grad`/`curl`/`div` satisfy `d d = 0` exactly). |
 | `out_dim` | `int` | `1` | output channels (number of vector fields for `node_vector`). |
@@ -579,7 +645,7 @@ Hyper-parameters of `RHMP`.
 | `connection_odd` | `bool` | `False` | connection columns also enter the ordinary odd path (non-Abelian connections). |
 | `lift_hidden` | `int` | `64` | hidden width of the even lifting gates `e_k`. |
 | `fused` | `bool` | `True` | fused polynomial-block kernels (`False` = plain autograd reference path, same maths). |
-| `layers` | `list[str] \| None` | `None` | per-layer types, e.g. `['poly', 'poly', 'resolvent', 'poly']` (DESIGN §9.2); `None` means `['poly'] * n_layers`. When given it defines the depth (`n_layers` is set to `len(layers)`). |
+| `layers` | `list[str] \| None` | `None` | per-layer types (`'poly' \| 'resolvent' \| 'solve' \| 'project'`), e.g. `['poly', 'poly', 'resolvent', 'poly']` (DESIGN §9.2) or `['project', 'poly', 'poly', 'poly']`; `None` means `['poly'] * n_layers`. When given it defines the depth (`n_layers` is set to `len(layers)`). |
 | `resolvent_iters` | `int` | `20` | CG iterations of resolvent layers (default 20). The solve acts identically on every channel and commutes with channel mixing (`M^{-1}(x Q) = (M^{-1} x) Q`), so no equivariant channel reduction lowers its cost; fewer iterations or warm starts do. |
 | `resolvent_grad` | `str` | `'implicit'` | `'implicit'` (adjoint CG solve, memory independent of the iterations; default) or `'unrolled'` (autograd through the checkpointed iterations; memory grows with `resolvent_iters`). |
 | `metric_type` | `str` | `'diag'` | `'diag'` (diagonal metrics, default) or `'tensor'` (Whitney/Galerkin material-tensor metric on the intermediate degrees for up blocks and cross-up terms, DESIGN §9.1). |
@@ -590,12 +656,38 @@ Hyper-parameters of `RHMP`.
 | `material_dims` | `dict[int, int]` | `{}` | `{k: m}`: the last `m` even columns of `inputs[k]` are *material* columns (e.g. `log sigma`): they feed *only* the metric heads (`psi` of the degree-k metric, the tensor-metric descriptors) and `metric_reference`, never the lifting, a gate or any feature path, so the only route from the material to the output is the metric `H`. |
 | `lifting` | `str` | `'mlp'` | `'mlp'` (default) or `'linear'` (`x_0 = W f_0`, `x_k = Lin(d x_{k-1}) + Lin(f_k)`: no geometry, biases or even gates; linear in the field inputs). |
 | `resolvent_normalize` | `bool` | `True` | `False`: resolvent layers use the un-normalised physical operator `(I + tau L^2 Delta_H)^{-1}` (identifies the metric's magnitude; see `RHMPLayer`). |
-| `solve_iters` | `int` | `64` | `'solve'` layers (`layers=[..., 'solve', ...]`): CG budget (the CG count grows like the square root of the mesh condition number; warm starts reuse the previous solve layer) and boundary condition (`'dirichlet'`: `K.meta['dirichlet'][k]` or `K.boundary[k]` fixed; `'none'`: no fixed cells; `'neumann'`: no fixed cells and vertex solves return the zero-mean (lumped mass) solution of the pure Neumann problem, as in the T5 generator). A solve layer computes `y_k = (Delta_H + lam / L^2)^{-1} x_k` with the un-normalised metric Hodge Laplacian `Delta_H` (FEM stiffness / lumped mass for k = 0) and `lam = softplus(log_lam)` (init 1e-3, `L^D` = domain measure). See `solver_preset`. |
-| `solve_tol` | `float` | `1e-06` | `'solve'` layers (`layers=[..., 'solve', ...]`): CG budget (the CG count grows like the square root of the mesh condition number; warm starts reuse the previous solve layer) and boundary condition (`'dirichlet'`: `K.meta['dirichlet'][k]` or `K.boundary[k]` fixed; `'none'`: no fixed cells; `'neumann'`: no fixed cells and vertex solves return the zero-mean (lumped mass) solution of the pure Neumann problem, as in the T5 generator). A solve layer computes `y_k = (Delta_H + lam / L^2)^{-1} x_k` with the un-normalised metric Hodge Laplacian `Delta_H` (FEM stiffness / lumped mass for k = 0) and `lam = softplus(log_lam)` (init 1e-3, `L^D` = domain measure). See `solver_preset`. |
-| `solve_bc` | `str` | `'dirichlet'` | `'solve'` layers (`layers=[..., 'solve', ...]`): CG budget (the CG count grows like the square root of the mesh condition number; warm starts reuse the previous solve layer) and boundary condition (`'dirichlet'`: `K.meta['dirichlet'][k]` or `K.boundary[k]` fixed; `'none'`: no fixed cells; `'neumann'`: no fixed cells and vertex solves return the zero-mean (lumped mass) solution of the pure Neumann problem, as in the T5 generator). A solve layer computes `y_k = (Delta_H + lam / L^2)^{-1} x_k` with the un-normalised metric Hodge Laplacian `Delta_H` (FEM stiffness / lumped mass for k = 0) and `lam = softplus(log_lam)` (init 1e-3, `L^D` = domain measure). See `solver_preset`. |
+| `solve_iters` | `int` | `64` | `'solve'` layers (`layers=[..., 'solve', ...]`): CG budget (the CG count grows like the square root of the mesh condition number; warm starts reuse the previous solve layer) and boundary condition (`'dirichlet'`: `K.meta['dirichlet'][k]` or `K.boundary[k]` fixed; `'none'`: no fixed cells; `'neumann'`: no fixed cells and vertex solves return the zero-mean (lumped mass) solution of the pure Neumann problem, as in the T5 generator; `'lift'`: the fixed cells of `'dirichlet'` keep the layer input, i.e. inhomogeneous Dirichlet data such as electrode potentials). A solve layer computes `y_k = (Delta_H + lam / L^2)^{-1} x_k` with the un-normalised metric Hodge Laplacian `Delta_H` (FEM stiffness / lumped mass for k = 0) and `lam = softplus(log_lam)` (init 1e-3, `L^D` = domain measure). See `solver_preset`. |
+| `solve_tol` | `float` | `1e-06` | `'solve'` layers (`layers=[..., 'solve', ...]`): CG budget (the CG count grows like the square root of the mesh condition number; warm starts reuse the previous solve layer) and boundary condition (`'dirichlet'`: `K.meta['dirichlet'][k]` or `K.boundary[k]` fixed; `'none'`: no fixed cells; `'neumann'`: no fixed cells and vertex solves return the zero-mean (lumped mass) solution of the pure Neumann problem, as in the T5 generator; `'lift'`: the fixed cells of `'dirichlet'` keep the layer input, i.e. inhomogeneous Dirichlet data such as electrode potentials). A solve layer computes `y_k = (Delta_H + lam / L^2)^{-1} x_k` with the un-normalised metric Hodge Laplacian `Delta_H` (FEM stiffness / lumped mass for k = 0) and `lam = softplus(log_lam)` (init 1e-3, `L^D` = domain measure). See `solver_preset`. |
+| `solve_bc` | `str` | `'dirichlet'` | `'solve'` layers (`layers=[..., 'solve', ...]`): CG budget (the CG count grows like the square root of the mesh condition number; warm starts reuse the previous solve layer) and boundary condition (`'dirichlet'`: `K.meta['dirichlet'][k]` or `K.boundary[k]` fixed; `'none'`: no fixed cells; `'neumann'`: no fixed cells and vertex solves return the zero-mean (lumped mass) solution of the pure Neumann problem, as in the T5 generator; `'lift'`: the fixed cells of `'dirichlet'` keep the layer input, i.e. inhomogeneous Dirichlet data such as electrode potentials). A solve layer computes `y_k = (Delta_H + lam / L^2)^{-1} x_k` with the un-normalised metric Hodge Laplacian `Delta_H` (FEM stiffness / lumped mass for k = 0) and `lam = softplus(log_lam)` (init 1e-3, `L^D` = domain measure). See `solver_preset`. |
 | `tensor_param` | `str` | `'full'` | tensor-metric parameterisation: `'full'` (default) `sigma_f = b_f expm(sum_j s_j t_j t_j^T)` with signed bounded `s` (every SPD tensor with bounded condition number, incl. anisotropy misaligned with the edges) or `'cone'` (`b_f I + sum_j a_j t_j t_j^T`, `a >= 0`: M-matrix stiffness only, the same class as the diagonal metric on triangles). Configurations saved without a `tensor_param` key (with `metric_type='tensor'`) load as `'cone'`, the parameterisation they were trained with. |
 | `solve_precond` | `str` | `'none'` | CG preconditioner of solve layers: `'none'` (Jacobi, default) or `'twolevel'` (Jacobi plus an additive coarse correction on per-graph spatial aggregates of about `rhmp.layers.COARSE_AGG_SIZE` vertices, assembled per sample and graph; degree 0 only, other degrees keep Jacobi). Same solution, far fewer iterations on large meshes; O(C)-equivariant and per sample. |
 | `readout_head` | `str` | `'mlp'` | `'mlp'` (default) or `'linear'`: the potential head of the `grad` readout (`phi = MLP(x_0)` or `phi = Lin_nobias(x_0)`); the solver preset uses `'linear'` so that the model stays linear in the field inputs. |
+| `term_gates` | `bool` | `False` | per-term gates in polynomial layers (`rhmp.layers.TermGate`): `m_k = sum_j c_j g_j t_j` over the powers `L^p x_k` and the cross terms, with per-cell factors `g_j` from scale-invariant invariants of the term vectors (default `False`: the plain polynomial message). |
+| `cochain_head` | `str` | `'linear'` | `'linear'` (default), `'gated'` or `'context'`: head of `cochain:k` readouts (`'gated'`: odd linear map times an even gate from invariants and the even inputs of degree k; `'context'`: the gated head with the coboundary of the degree `k-1` features in the odd part and the vertex mean of the vertex features in the gate; `rhmp.readout.CochainReadout`). |
+| `readout_hidden` | `int` | `16` | hidden width of the gated cochain heads. |
+| `amplitude_dims` | `dict[int, int]` | `{}` | `{k: n}`: the first `n` columns of `inputs[k]` scale with one field amplitude (e.g. the velocity 1-form and its even companion): they are divided by their per-sample RMS `s` (over all such columns and cells; per graph in block-diagonal batches) and the output is multiplied by `s`, so the model is exactly homogeneous of degree one in that amplitude (the other inputs, e.g. densities, are not scaled). `s` is invariant under orientation changes, relabelling, E(n) and O(C), and per sample. |
+| `lift_context` | `int` | `0` | `p > 0`: the even lifting gates of degrees `k >= 1` also see the vertex mean over the cell of a projection `P x_0` (`C -> p`) of the lifted vertex features (default 0: off; `rhmp.lifting`). |
+| `lift_vertex` | `bool` | `False` | the vertex MLP of the lifting also sees the DEC codifferential of the odd edge inputs and the vertex means of their squares and of the even edge inputs (default False; `rhmp.lifting`). |
+| `readout_layers` | `str` | `'last'` | `'last'` (default) or `'all'`: `cochain:k` readouts read the features of degree k after the lifting and after every layer, each through its own linear map (`u = sum_l W_l x_k^(l)`), so that different output channels combine different filters of the stack (`rhmp.readout.CochainReadout`). |
+| `readout_depth` | `int` | `1` | number of odd gated stages of the gated / context cochain heads (default 1). |
+| `readout_skip` | `bool` | `False` | the gated / context head of `cochain:k` also reads the odd input columns of degree `k` and the coboundary `d_{k-1} f_{k-1}^odd` of the odd input columns of degree `k-1` through bias-free linear maps (a linear skip from the inputs, e.g. the circulation of the velocity 1-form on faces; default False). |
+| `readout_spatial` | `bool` | `False` | the further stages of a deep gated / context head (`readout_depth >= 2`) also mix the neighbouring k-cells through the combinatorial Hodge Laplacian of degree k (default False). |
+| `readout_wedge` | `int` | `0` | `h > 0`: the gated / context head of a `cochain:2` readout also reads `h` wedge products `(x_1 A_j) ^ (x_1 B_j)` of two projections of the final edge features (metric-free cup product of 1-cochains on the faces; a true 2-cochain, so the output keeps its orientation parity), e.g. the advection `theta ^ delta(d theta)` of a vorticity 2-form; default 0: off (`rhmp.readout.face_wedge`). |
+| `frozen_units` | `bool` | `False` | the per-mesh geometric normalisers (geometric means of the reference stars, medians behind the relative descriptors, unit-metric bounds of the Hodge blocks) are those of the training mesh, stored in the model by `RHMP.freeze_units` (the trainer calls it on the training complex), instead of being recomputed on every mesh: on another mesh the stars are divided by the training geometric means, the descriptors become `log(x / median_train)` and each block bound is `beta(H) * beta_unit(train) / beta_unit(mesh)`; tensor-metric blocks use `rho * beta_unit(train)`, and resolvent layers and transport fluxes the same block bounds. On the training mesh the model is unchanged; it is no longer invariant to a global change of length unit (default False; diagonal and tensor metrics, 'dec' / 'none' scaling, polynomial and normalised resolvent layers, transport norm 'metric'). |
+| `frozen_descriptors` | `bool \| str` | `True` | with `frozen_units`, also express the relative descriptors against the training medians (default True). False: only the operator normalisation is that of the training mesh (star means and block bounds); the descriptors stay `log(x / median_mesh)` on every mesh. `'auto'`: decided per relative column and mesh: training-mesh units if the mesh's median of the column, in training-mesh units, lies in the [min, max] of that column on the training mesh, else relative to the mesh's own median (star means and block bounds always in training-mesh units). Ignored without frozen references. |
+| `amplitude_power` | `int` | `1` | the output is multiplied by `s^p` (default 1); `p = 2`: homogeneous of degree two in the amplitude columns (e.g. a pressure for a velocity 1-form: dynamic similarity); `p = 0`: the output is not rescaled (a nondimensional output, e.g. a pressure coefficient). |
+| `amplitude_energy` | `bool` | `False` | the output factor `s` is the field magnitude of the amplitude 1-form columns of degree 1, `s_E = sqrt(sum_f theta_f^T M_f theta_f / sum_f \|f\|)` (Galerkin energy density over the domain; exactly `\|u\|` for the 1-form of a uniform field `u` on any simplicial mesh), instead of the RMS of the cochain values, which scales with the edge lengths; the inputs are still divided by the RMS. The same energy density (of the normalised columns) is the reference of energy readouts and projection layers (`rhmp.layers.reference_energy`). Needs `amplitude_dims[1] > 0` and Whitney blocks (default False). |
+| `readout_energy` | `int` | `0` | `h > 0`: the `node_scalar` readout also reads `h` Galerkin energy densities `<x_1 A_j, x_1 B_j>` of projections of the final edge features at the vertices (symmetric quadratic forms in the reference metric; `rhmp.readout.NodeScalarReadout`); default 0: off. |
+| `readout_energy_clip` | `float` | `0.0` | `c > 0`: the energy channels are bounded, `q -> c tanh(q / c)` (default 0: off). |
+| `project_harmonic` | `bool` | `True` | `'project'` layers (`layers=[..., 'project', ...]`: metric Hodge projection of the edge features with the learned edge metric, `rhmp.layers.RHMPLayer._project_forward`) also remove the circulation along the cohomology generators `K.meta['cohomology'][1]` in a learned Kutta metric (default True; no effect on complexes without generators). |
+| `kutta_range` | `float` | `8.0` | bound `a` of the log Kutta weights of projection layers (default 8). |
+| `project_solver` | `str` | `'cg'` | solver of projection layers: `'cg'` (default; preconditioned CG with `solve_iters`, `solve_tol`, `solve_precond`) or `'direct'` (sparse LU per graph and sample on the CPU in float64 with adjoint gradients; exact, diagonal metrics only) or `'dense'` (batched dense Cholesky on the device in float64, one factorisation per sample; exact, diagonal and tensor metrics, one graph per batch: `rhmp.layers.dense_projection`). |
+| `kutta_corner` | `float` | `0.0` | `s > 0`: prior of the Kutta weights at re-entrant corners of the boundary, `kappa = a tanh(MLP + s c_e)` with a learnable slope initialised at `s` and the corner indicator `c_e` of `rhmp.layers.boundary_corner` (default 0: the weights are learned from a uniform start). |
+| `transport` | `dict` | `{}` | transport term of the vertices (`rhmp.transport`; empty = off, the default). Keys: `inputs` (odd columns of `inputs[1]` that are transport fields, e.g. a velocity one-form), `latent` (number of latent edge columns used as fields), `hidden` (0-2 O(C)-invariant odd contractions of the hidden state), `forms` (subset of `cons, adv, upwind`), `order` (power `P` of the transport operator per layer), `norm` (`'metric'`: fluxes `H_1 phi` with the Gershgorin-normalised metric, the field keeps its magnitude; `'sample'`: every field operator normalised per sample), `metric` (`'layer'`: the layer's learned `H_1`; `'star'`: the reference star). Each poly / resolvent layer adds `sum_p g_p T^p x_0` to the vertex message, `T = sum_j a_j C(F_j) + b_j A(F_j) + c_j U(F_j)`, with scalar coefficients (init 0), conservative `C`, advective `A = C^T` and upwind `U` operators of the fluxes `F_j = H_1 phi_j / beta`. Solve and projection layers carry no transport term. |
+| `solve_picard` | `int` | `0` | number `J` of fixed-point (Picard) iterations of the vertex solve of `'solve'` layers with a state-dependent metric (0, the default: one solve). Iteration `j` predicts the vertex-block metric (`H_1`, diagonal or tensor) from the usual descriptors plus the field-energy invariant of the previous iterate (`y_0 = 0`) and solves with the layer input as right-hand side; `y_j = y_{j-1} + omega (S(H_j) x - y_{j-1})` for `j >= 2`, weight-tied, learnable `omega` (see `RHMPLayer`). For nonlinear constitutive laws (e.g. saturable magnetic materials, `nu(\|B\|)`). |
+| `picard_relax` | `float` | `0.5` | initial relaxation `omega` in (0, 1) of the Picard iteration. |
+| `metric_geo` | `bool` | `True` | `False`: the metric heads see no geometric descriptors (material columns, feature invariants and the Picard energy invariant only), so the learned metric is a function of material and state alone (a constitutive law without mesh-specific position cues). Default `True`. |
+| `picard_init` | `str` | `'zero'` | `'zero'` (default: the first Picard iteration starts from `y_0 = 0`) or `'learned'` (a learnable uniform starting energy invariant; see `RHMPLayer`). |
 
 <details><summary>docstring</summary>
 
@@ -614,8 +706,9 @@ Attributes:
     tie_metrics: one metric per degree (up uses ``H_m``, down uses ``1/H_m``) vs. separate up/down heads.
     scaling: ``'dec' | 'jacobi' | 'none'`` operator scaling.
     cross: cross-degree transport terms.
-    gate: ``'norm'`` (radial gate), ``'relu'`` (ablation) or ``'none'`` (no nonlinearity; used by
-        :meth:`solver_preset`).
+    gate: ``'norm'`` (radial gate), ``'relu'`` (ablation), ``'none'`` (no nonlinearity; used by
+        :meth:`solver_preset`) or ``'homog'`` (gate homogeneous of degree one in the field amplitude:
+        ``x + gamma g(xi) m`` with scale-invariant invariants ``xi``, see ``rhmp.layers.RadialGate``).
     identity_metric: every metric ``H = 1`` (ablation of the learned metric, DESIGN §3.2): no learned correction
         and no reference star inside ``H``.  With ``scaling='dec'`` the blocks still carry the DEC stars of their
         own degree through the symmetric scaling ``S`` (``S_up = star_k``, ``S_down = 1/star_k``), so the geometric
@@ -631,7 +724,8 @@ Attributes:
     connection_odd: connection columns also enter the ordinary odd path (non-Abelian connections).
     lift_hidden: hidden width of the even lifting gates ``e_k``.
     fused: fused polynomial-block kernels (``False`` = plain autograd reference path, same maths).
-    layers: per-layer types, e.g. ``['poly', 'poly', 'resolvent', 'poly']`` (DESIGN §9.2); ``None`` means
+    layers: per-layer types (``'poly' | 'resolvent' | 'solve' | 'project'``), e.g. ``['poly', 'poly', 'resolvent',
+        'poly']`` (DESIGN §9.2) or ``['project', 'poly', 'poly', 'poly']``; ``None`` means
         ``['poly'] * n_layers``.  When given it defines the depth (``n_layers`` is set to ``len(layers)``).
     resolvent_iters: CG iterations of resolvent layers (default 20).  The solve acts identically on every
         channel and commutes with channel mixing (``M^{-1}(x Q) = (M^{-1} x) Q``), so no equivariant channel
@@ -664,13 +758,70 @@ Attributes:
         count grows like the square root of the mesh condition number; warm starts reuse the previous solve layer)
         and boundary condition (``'dirichlet'``: ``K.meta['dirichlet'][k]`` or ``K.boundary[k]`` fixed; ``'none'``:
         no fixed cells; ``'neumann'``: no fixed cells and vertex solves return the zero-mean (lumped mass)
-        solution of the pure Neumann problem, as in the T5 generator).
+        solution of the pure Neumann problem, as in the T5 generator; ``'lift'``: the fixed cells of
+        ``'dirichlet'`` keep the layer input, i.e. inhomogeneous Dirichlet data such as electrode potentials).
         A solve layer computes ``y_k = (Delta_H + lam / L^2)^{-1} x_k`` with the un-normalised metric Hodge
         Laplacian ``Delta_H`` (FEM stiffness / lumped mass for k = 0) and ``lam = softplus(log_lam)`` (init 1e-3,
         ``L^D`` = domain measure).  See :meth:`solver_preset`.
     readout_head: ``'mlp'`` (default) or ``'linear'``: the potential head of the ``grad`` readout
         (``phi = MLP(x_0)`` or ``phi = Lin_nobias(x_0)``); the solver preset uses ``'linear'`` so that the model
         stays linear in the field inputs.
+    term_gates: per-term gates in polynomial layers (``rhmp.layers.TermGate``): ``m_k = sum_j c_j g_j t_j`` over
+        the powers ``L^p x_k`` and the cross terms, with per-cell factors ``g_j`` from scale-invariant
+        invariants of the term vectors (default ``False``: the plain polynomial message).
+    cochain_head: ``'linear'`` (default), ``'gated'`` or ``'context'``: head of ``cochain:k`` readouts
+        (``'gated'``: odd linear map times an even gate from invariants and the even inputs of degree k;
+        ``'context'``: the gated head with the coboundary of the degree ``k-1`` features in the odd part and the
+        vertex mean of the vertex features in the gate; ``rhmp.readout.CochainReadout``).
+    readout_hidden: hidden width of the gated cochain heads.
+    lift_context: ``p > 0``: the even lifting gates of degrees ``k >= 1`` also see the vertex mean over the cell of a
+        projection ``P x_0`` (``C -> p``) of the lifted vertex features (default 0: off; ``rhmp.lifting``).
+    lift_vertex: the vertex MLP of the lifting also sees the DEC codifferential of the odd edge inputs and the
+        vertex means of their squares and of the even edge inputs (default False; ``rhmp.lifting``).
+    readout_depth: number of odd gated stages of the gated / context cochain heads (default 1).
+    readout_spatial: the further stages of a deep gated / context head (``readout_depth >= 2``) also mix the
+        neighbouring k-cells through the combinatorial Hodge Laplacian of degree k (default False).
+    readout_skip: the gated / context head of ``cochain:k`` also reads the odd input columns of degree ``k`` and the
+        coboundary ``d_{k-1} f_{k-1}^odd`` of the odd input columns of degree ``k-1`` through bias-free linear maps
+        (a linear skip from the inputs, e.g. the circulation of the velocity 1-form on faces; default False).
+    readout_wedge: ``h > 0``: the gated / context head of a ``cochain:2`` readout also reads ``h`` wedge products
+        ``(x_1 A_j) ^ (x_1 B_j)`` of two projections of the final edge features (metric-free cup product of
+        1-cochains on the faces; a true 2-cochain, so the output keeps its orientation parity), e.g. the
+        advection ``theta ^ delta(d theta)`` of a vorticity 2-form; default 0: off (``rhmp.readout.face_wedge``).
+    readout_layers: ``'last'`` (default) or ``'all'``: ``cochain:k`` readouts read the features of degree k after
+        the lifting and after every layer, each through its own linear map (``u = sum_l W_l x_k^(l)``), so that
+        different output channels combine different filters of the stack (``rhmp.readout.CochainReadout``).
+    amplitude_dims: ``{k: n}``: the first ``n`` columns of ``inputs[k]`` scale with one field amplitude (e.g. the
+        velocity 1-form and its even companion): they are divided by their per-sample RMS ``s`` (over all such
+        columns and cells; per graph in block-diagonal batches) and the output is multiplied by ``s``, so the model
+        is exactly homogeneous of degree one in that amplitude (the other inputs, e.g. densities, are not
+        scaled).  ``s`` is invariant under orientation changes, relabelling, E(n) and O(C), and per sample.
+    amplitude_power: the output is multiplied by ``s^p`` (default 1); ``p = 2``: homogeneous of degree two in the
+        amplitude columns (e.g. a pressure for a velocity 1-form: dynamic similarity); ``p = 0``: the output is
+        not rescaled (a nondimensional output, e.g. a pressure coefficient).
+    amplitude_energy: the output factor ``s`` is the field magnitude of the amplitude 1-form columns of degree 1,
+        ``s_E = sqrt(sum_f theta_f^T M_f theta_f / sum_f |f|)`` (Galerkin energy density over the domain; exactly
+        ``|u|`` for the 1-form of a uniform field ``u`` on any simplicial mesh), instead of the RMS of the cochain
+        values, which scales with the edge lengths; the inputs are still divided by the RMS.  The same energy
+        density (of the normalised columns) is the reference of energy readouts and projection layers
+        (``rhmp.layers.reference_energy``).  Needs ``amplitude_dims[1] > 0`` and Whitney blocks (default False).
+    readout_energy: ``h > 0``: the ``node_scalar`` readout also reads ``h`` Galerkin energy densities
+        ``<x_1 A_j, x_1 B_j>`` of projections of the final edge features at the vertices (symmetric quadratic forms
+        in the reference metric; ``rhmp.readout.NodeScalarReadout``); default 0: off.
+    readout_energy_clip: ``c > 0``: the energy channels are bounded, ``q -> c tanh(q / c)`` (default 0: off).
+    project_harmonic: ``'project'`` layers (``layers=[..., 'project', ...]``: metric Hodge projection of the edge
+        features with the learned edge metric, ``rhmp.layers.RHMPLayer._project_forward``) also remove the
+        circulation along the cohomology generators ``K.meta['cohomology'][1]`` in a learned Kutta metric
+        (default True; no effect on complexes without generators).
+    kutta_range: bound ``a`` of the log Kutta weights of projection layers (default 8).
+    kutta_corner: ``s > 0``: prior of the Kutta weights at re-entrant corners of the boundary,
+        ``kappa = a tanh(MLP + s c_e)`` with a learnable slope initialised at ``s`` and the corner indicator
+        ``c_e`` of ``rhmp.layers.boundary_corner`` (default 0: the weights are learned from a uniform start).
+    project_solver: solver of projection layers: ``'cg'`` (default; preconditioned CG with ``solve_iters``,
+        ``solve_tol``, ``solve_precond``) or ``'direct'`` (sparse LU per graph and sample on the CPU in float64 with
+        adjoint gradients; exact, diagonal metrics only) or ``'dense'`` (batched dense Cholesky on the device in
+        float64, one factorisation per sample; exact, diagonal and tensor metrics, one graph per batch:
+        :func:`rhmp.layers.dense_projection`).
     solve_precond: CG preconditioner of solve layers: ``'none'`` (Jacobi, default) or ``'twolevel'`` (Jacobi plus
         an additive coarse correction on per-graph spatial aggregates of about ``rhmp.layers.COARSE_AGG_SIZE``
         vertices, assembled per sample and graph; degree 0 only, other degrees keep Jacobi).  Same solution, far
@@ -690,6 +841,43 @@ Attributes:
         relative to the known coefficient.  Tensor metrics scale the material tensor instead: ``b_f`` by
         ``exp(mean of ref over the m-cells of f)`` and, for the edge metric, ``a_{f,j}`` by ``exp(ref of direction
         edge j)``.  Ignored with ``identity_metric``.
+    transport: transport term of the vertices (``rhmp.transport``; empty = off, the default).  Keys: ``inputs``
+        (odd columns of ``inputs[1]`` that are transport fields, e.g. a velocity one-form), ``latent`` (number of
+        latent edge columns used as fields), ``hidden`` (0-2 O(C)-invariant odd contractions of the hidden state),
+        ``forms`` (subset of ``cons, adv, upwind``), ``order`` (power ``P`` of the transport operator per layer),
+        ``norm`` (``'metric'``: fluxes ``H_1 phi`` with the Gershgorin-normalised metric, the field keeps its
+        magnitude; ``'sample'``: every field operator normalised per sample), ``metric`` (``'layer'``: the
+        layer's learned ``H_1``; ``'star'``: the reference star).  Each poly / resolvent layer adds
+        ``sum_p g_p T^p x_0`` to the vertex message, ``T = sum_j a_j C(F_j) + b_j A(F_j) + c_j U(F_j)``, with
+        scalar coefficients (init 0), conservative ``C``, advective ``A = C^T`` and upwind ``U`` operators of the
+        fluxes ``F_j = H_1 phi_j / beta``.  Solve and projection layers carry no transport term.
+    frozen_units: the per-mesh geometric normalisers (geometric means of the reference stars, medians behind the
+        relative descriptors, unit-metric bounds of the Hodge blocks) are those of the training mesh, stored in the
+        model by :meth:`RHMP.freeze_units` (the trainer calls it on the training complex), instead of being
+        recomputed on every mesh: on another mesh the stars are divided by the training geometric means, the
+        descriptors become ``log(x / median_train)`` and each block bound is ``beta(H) * beta_unit(train) /
+        beta_unit(mesh)``; tensor-metric blocks use ``rho * beta_unit(train)``, and resolvent layers and transport
+        fluxes the same block bounds.  On the training mesh the model is unchanged; it is no longer invariant to a
+        global change of length unit (default False; diagonal and tensor metrics, 'dec' / 'none' scaling,
+        polynomial and normalised resolvent layers, transport norm 'metric').
+    frozen_descriptors: with ``frozen_units``, also express the relative descriptors against the training medians
+        (default True).  False: only the operator normalisation is that of the training mesh (star means and block
+        bounds); the descriptors stay ``log(x / median_mesh)`` on every mesh.  ``'auto'``: decided per relative
+        column and mesh: training-mesh units if the mesh's median of the column, in training-mesh units, lies in
+        the [min, max] of that column on the training mesh, else relative to the mesh's own median (star means and
+        block bounds always in training-mesh units).  Ignored without frozen references.
+    solve_picard: number ``J`` of fixed-point (Picard) iterations of the vertex solve of ``'solve'`` layers with a
+        state-dependent metric (0, the default: one solve).  Iteration ``j`` predicts the vertex-block metric
+        (``H_1``, diagonal or tensor) from the usual descriptors plus the field-energy invariant of the previous
+        iterate (``y_0 = 0``) and solves with the layer input as right-hand side; ``y_j = y_{j-1} + omega (S(H_j) x
+        - y_{j-1})`` for ``j >= 2``, weight-tied, learnable ``omega`` (see ``RHMPLayer``).  For nonlinear
+        constitutive laws (e.g. saturable magnetic materials, ``nu(|B|)``).
+    picard_relax: initial relaxation ``omega`` in (0, 1) of the Picard iteration.
+    metric_geo: ``False``: the metric heads see no geometric descriptors (material columns, feature invariants and
+        the Picard energy invariant only), so the learned metric is a function of material and state alone (a
+        constitutive law without mesh-specific position cues).  Default ``True``.
+    picard_init: ``'zero'`` (default: the first Picard iteration starts from ``y_0 = 0``) or ``'learned'`` (a
+        learnable uniform starting energy invariant; see ``RHMPLayer``).
 ```
 
 </details>
@@ -831,6 +1019,29 @@ Note:
 
 </details>
 
+#### `RHMP.freeze_units`
+
+```python
+freeze_units(K: Any) -> RHMP
+```
+Store the per-mesh geometric normalisers of `K` (the training mesh, one complex) as buffers (`frozen_log_gm`, `frozen_geo_<k>`, `frozen_beta`; the descriptor ranges `frozen_geo_min_<k>` / `frozen_geo_max_<k>` for `frozen_descriptors='auto'`) and use them on every mesh from now on (`RHMPConfig.frozen_units`; `rhmp.layers.unit_reference`).  The output on `K` itself is unchanged, so a model trained without the option can be evaluated with it by calling this on its training mesh.
+
+<details><summary>docstring</summary>
+
+```text
+Returns:
+    ``self``.
+```
+
+</details>
+
+#### `RHMP.frozen_reference`
+
+```python
+frozen_reference() -> dict | None
+```
+The stored training-mesh normalisers in the form of `rhmp.layers.make_context` (`frozen`), or `None` if `freeze_units` has not been called (and no checkpoint carried them).  Without `cfg.frozen_descriptors` the descriptor medians are left out (`geo_log_median=None`); with `'auto'` the descriptor ranges of the training mesh are added (`geo_range`).
+
 #### staticmethod `RHMP.geo_dims_of`
 
 ```python
@@ -916,6 +1127,36 @@ Learned metrics of every layer for these inputs (public accessor for analysis sc
 Returns:
     One dict per layer (see ``RHMPLayer.metric_fields``): ``{'log_ratio': {m: (n_m, B)}, 'phi': {m: (n_m, B)},
     'tensor': {km: (b (n_top, B), a (n_top, B, m))}, 'sigma': {km: (n_top, B, D, D)}}``.
+```
+
+</details>
+
+#### `RHMP.projection_fields`
+
+```python
+projection_fields(
+    inputs: dict[int, Tensor],
+    K: Any,
+    probe: Tensor | None = None,
+    layer: int | None = None,
+) -> dict
+```
+What a projection layer does to a probe 1-cochain, with the metrics it computes for these inputs (analysis: the learned potential flow, its circulation, the Kutta weights).
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    inputs, K: as for :meth:`forward`.
+    probe: ``(n1, B, P)`` cochains (default: the amplitude columns of ``inputs[1]`` after the amplitude
+        normalisation, i.e. the unit inflow 1-form).
+    layer: index of the projection layer (default: the first one).
+Returns:
+    dict with ``u (n1, B, P)`` (probe projected, circulation removed), ``u_no_circulation`` (projection only),
+    ``alpha (n0, B, P)``, ``Gamma (S, B, r, P)``, ``gamma (n1, B, r)`` (``None`` without generators),
+    ``kappa (n1, B)`` (log Kutta weight relative to ``star1``), ``log_H_ratio (n1, B)`` (learned log edge
+    metric relative to the normalised reference star; ``None`` for tensor metrics), ``probe`` and
+    ``amplitude`` (the output amplitude ``(S, B)`` or ``None``).
 ```
 
 </details>
@@ -1088,7 +1329,11 @@ Discrete exterior calculus toolkit on cochain complexes (DESIGN §9.1, §9.3).
   ``M_f = b_f G0_f + sum_j a_fj Gk_fj`` (precomputed PSD blocks ``K.whitney[k]``); ``H_k = sum_f P_f^T M_f P_f``.
 * Solvers: :func:`cg_solve` (batched CG on ``(n, B, C)``, per-sample Frobenius inner products -> O(C)-equivariant,
   unrolled autograd) and :func:`cg_solve_implicit` (adjoint-solve gradients).
-* Metric Hodge Laplacians and decomposition: :func:`hodge_laplacian`, :func:`hodge_decompose`, :func:`harmonic_basis`.
+* Metric Hodge Laplacians and decomposition: :func:`hodge_laplacian`, :func:`hodge_decompose`, :func:`harmonic_basis`;
+  closed generators of the first cohomology of planar domains with holes: :func:`cohomology_generators`, and their
+  harmonic representatives :func:`harmonic_generators`.
+* Galerkin energies of 1-cochains: :func:`whitney_energy` (per top cell) and :func:`vertex_energy` (density at the
+  vertices), exact for the cochains of constant fields.
 * Whitney interpolation: :func:`sharp` (1-cochain -> vector field) and :func:`flat` (vector field -> 1-cochain).
 
 Metric arguments ``H`` (Laplacians / decomposition) are indexed by degree (list, tuple or dict); an entry is a
@@ -1343,6 +1588,120 @@ Returns:
 
 </details>
 
+### `cohomology_generators`
+
+```python
+cohomology_generators(K) -> Tensor
+```
+Closed 1-cochains that generate the first cohomology of a planar 2-complex with holes (an oriented surface of genus 0 with boundary): `(n1, r)` float32 with entries in `{-1, 0, 1}`, `r` = number of boundary loops - 1.
+
+<details><summary>docstring</summary>
+
+```text
+For every boundary loop except the longest one (the outer boundary of a planar domain) a shortest chain of faces
+to the outer loop is found by a breadth-first search in the dual graph; the generator is the crossing cochain of
+that chain, +-1 on the edges it crosses (signs from the face orientations) and 0 elsewhere.  It is exactly closed
+(``d1 c = 0`` in integer arithmetic) and sums to +-1 around its loop, so it is not exact; the ``r`` cochains are a
+basis of ``H^1`` (the first Betti number of a genus-0 surface with ``r + 1`` boundary loops).  Any metric-harmonic
+representative follows by a projection (``c - d0 (d0^T H d0)^+ d0^T H c``).  The sign of a generator and the chain
+depend on the cell numbering; the cohomology class does not, up to that sign.
+
+Args:
+    K: a single 2-complex with consistently oriented faces (``meta['face_edges']``).
+Returns:
+    ``(n1, r)`` on the device of ``K`` (``r = 0`` for a disk or a closed surface).
+Raises:
+    ValueError: for batches, non-manifold edges, inconsistent face orientations or disconnected domains.
+```
+
+</details>
+
+### `harmonic_generators`
+
+```python
+harmonic_generators(K, H: Tensor | None = None, dtype: torch.dtype = torch.float32) -> Tensor
+```
+Harmonic representatives of `cohomology_generators`: `gamma = c - d0 psi` with `(d0^T H d0) psi = d0^T H c` on all vertices (natural condition on every boundary), so that `gamma` is closed (to round-off), co-closed (`d0^T H gamma = 0`: no flux through any boundary) and keeps the period +-1 of `c` around its hole: the circulation fields of the domain.  Sparse direct solves in float64 on the CPU.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    K: a single planar 2-complex (see :func:`cohomology_generators`).
+    H: diagonal edge metric ``(n1,)`` (default: the reference star ``K.star[1]``).
+    dtype: dtype of the result.
+Returns:
+    ``(n1, r)`` on the device of ``K``.
+```
+
+</details>
+
+### `top_measure`
+
+```python
+top_measure(K) -> Tensor
+```
+Areas (triangle complexes) or volumes (tetrahedral complexes) of the top cells, `(n_top,)` float64 (cells of a periodic complex in their own unwrapped frames).
+
+### `top_aspect`
+
+```python
+top_aspect(K) -> Tensor
+```
+Aspect ratio `l_max^d / (d! |f|)` of the top cells (`l_max` the longest edge), `(n_top,)` float64.
+
+### `whitney_energy`
+
+```python
+whitney_energy(K, a: Tensor, b: Tensor | None = None) -> Tensor
+```
+`int_f <a, b>` of the Whitney interpolants of two 1-cochains on every top cell, `e_f = a_f^T G0_f b_f` with the Galerkin mass blocks of `K.whitney[1]` (the reference metric `H_1` of the tensor-metric path).
+
+<details><summary>docstring</summary>
+
+```text
+Symmetric, positive for ``b = a``, exact for the cochains of constant fields (``e_f = |f| u . v`` for
+``a_e = u . (x_dst - x_src)``, ``b_e = v . (x_dst - x_src)``), invariant under edge orientation flips (both cochains
+change sign), relabelling and E(n).
+
+Args:
+    K: triangle or tetrahedral complex with ``K.whitney[1]``; a, b: ``(n1, *tail)`` (``b = None``: ``b = a``).
+Returns:
+    ``(n_top, *tail)``.
+```
+
+</details>
+
+### `vertex_energy`
+
+```python
+vertex_energy(
+    K,
+    a: Tensor,
+    b: Tensor | None = None,
+    measure: Tensor | None = None,
+    aspect_cap: float | None = 32.0,
+) -> Tensor
+```
+Galerkin energy density of two 1-cochains at the vertices: the `whitney_energy` of the top cells around vertex `i` divided by their measure, `q_i = sum_{f ∋ i} w_f a_f^T G0_f b_f / sum_{f ∋ i} w_f |f|`.
+
+<details><summary>docstring</summary>
+
+```text
+The pointwise inner product ``u . v`` for the cochains of constant fields on any simplicial mesh (the lumped
+formula ``sum_{e ∋ i} star1_e a_e b_e / (2 star0_i)`` is not, on graded meshes).  ``w_f = 1`` for cells with an
+aspect ratio (:func:`top_aspect`) up to ``aspect_cap`` and ``(aspect_cap / aspect)^2`` beyond (slivers of
+Delaunay triangulations of random points; still exact for constant fields; ``None``: no weighting).
+
+Args:
+    K: triangle or tetrahedral complex; a, b: ``(n1, *tail)``; measure: :func:`top_measure` if already known.
+    aspect_cap: see above (default :data:`ASPECT_CAP`).
+Returns:
+    ``(n0, *tail)``.
+```
+
+</details>
+
 ### `sharp`
 
 ```python
@@ -1381,6 +1740,10 @@ Returns:
 
 </details>
 
+### Constants
+
+- `ASPECT_CAP`: 32.0
+
 
 ## Geometry: `rhmp.geometry`
 
@@ -1395,7 +1758,9 @@ Everything here is computed once per complex under ``torch.no_grad()`` in float6
 ``index_add``/``scatter_reduce``; no loops over cells) and cached on the complex as float32.
 Only intrinsic quantities (lengths, areas, volumes, angles) are used, so every output is invariant
 under rotations, reflections and translations of ``pos``.  Scale quantities enter the descriptors
-as ``log(x / median_x)`` with the median taken over *this* complex (mesh-transferable, DESIGN §3.1).
+as ``log(x / median_x)`` with the median taken over *this* complex (mesh-transferable, DESIGN §3.1);
+the log medians are returned as well (``geo_log_median``, columns :data:`GEO_RELATIVE_COLUMNS`), so that a
+model can re-express the descriptors in the units of its training mesh (``RHMPConfig.frozen_units``).
 
 Reference stars (DESIGN §3.1):
   * ``cotan``: ``star0`` barycentric dual area, ``star1 = sum_f w_fe`` with ``w_fe = cot(opposite
@@ -1409,6 +1774,48 @@ Reference stars (DESIGN §3.1):
 
 Descriptor columns per degree are listed in :data:`GEO_FEATURE_NAMES` (identical for all cell
 types so that a model can move between complexes; columns that do not apply are constant).
+```
+
+</details>
+
+### `min_image`
+
+```python
+min_image(d: Tensor, period) -> Tensor
+```
+Minimal-image representative of position differences on a flat torus with axis-aligned periods.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    d: ``(..., D)`` differences of vertex positions.
+    period: ``(L_1, .., L_P)`` with ``P <= D`` (axes ``P..D-1`` are not periodic).
+Returns:
+    ``(..., D)``: ``d_i - L_i round(d_i / L_i)`` on the periodic axes (each in ``[-L_i/2, L_i/2]``), ``d_i``
+    elsewhere.
+```
+
+</details>
+
+### `local_cell_positions`
+
+```python
+local_cell_positions(P: Tensor, cells: Tensor, period=None) -> Tensor
+```
+Vertex positions of every cell, `(n, m, D)`; on a periodic complex in the cell's own (unwrapped) frame.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    P: ``(n0, D)`` positions.
+    cells: ``(n, m)`` vertex ids (``-1`` padded slots get the position of the first vertex).
+    period: ``None`` or the axis periods of a flat torus (see :func:`min_image`): the first vertex of each cell
+        is kept and the others are placed at their minimal images relative to it, so that every cell is a
+        contiguous polygon / simplex (intrinsic geometry of the torus).
+Returns:
+    ``(n, m, D)`` in the dtype of ``P``.
 ```
 
 </details>
@@ -1445,6 +1852,7 @@ surface_geometry(
     corner: dict[str, Tensor],
     star: str = 'cotan',
     kappa: float = 0.01,
+    period=None,
 ) -> dict
 ```
 Stars, descriptors and boundary flags of a 2-complex (triangles and/or polygons).
@@ -1459,10 +1867,13 @@ Args:
     edges: ``(n1, 2)`` int64 canonical edges (src < dst).
     corner: corner/half-edge table, each ``(H,)`` with ``H = sum(face_len)``: ``face``, ``v`` (corner
         vertex), ``next``, ``prev`` (neighbouring vertices in the face), ``edge`` (edge id of the
-        half-edge ``v -> next``), ``sign`` (+1 if ``v < next``), ``prev_idx`` (corner index of ``prev``
-        in the same face; for triangles this is the corner opposite the half-edge).
+        half-edge ``v -> next``), ``sign`` (+1 if ``v < next``), ``prev_idx`` / ``next_idx`` (corner index of
+        ``prev`` / ``next`` in the same face; for triangles ``prev`` is the corner opposite the half-edge).
     star: ``'cotan' | 'barycentric' | 'unit'``.
     kappa: cotan clamp factor.
+    period: ``None``, or the axis periods of a flat torus (periodic complex, see :func:`min_image`): edge
+        vectors are minimal images and every face is measured in its own unwrapped frame
+        (:func:`local_cell_positions`), so all quantities are the intrinsic ones of the torus.
 Returns:
     dict with ``star`` (3 tensors ``(n_k,)`` float32 > 0), ``geo`` (3 tensors ``(n_k, G_k)`` float32),
     ``boundary`` (3 bool tensors) and ``stats`` (python numbers).
@@ -1632,6 +2043,7 @@ Returns:
 ### Constants
 
 - `GEO_FEATURE_NAMES`: dict with keys {0, 1, 2, 3}
+- `GEO_RELATIVE_COLUMNS`: dict with keys {0, 1, 2, 3}
 - `STAR_TYPES`: ('cotan', 'barycentric', 'unit')
 - `KAPPA`: 0.01
 - `COT_CLAMP`: 10.0
@@ -2163,7 +2575,7 @@ Everything a run needs, normalised and on `device` (DESIGN §4).
 | `spatial_dim` | `int` | required | embedding dimension of the mesh (2 or 3). |
 | `out_dim` | `int` | `1` | number of output channels. |
 | `native` | `bool` | `True` | native-cochain (True) or v1-legacy (False) inputs/outputs. |
-| `meta` | `dict` | `{}` | task defaults and diagnostics: `v1_C`, `batch_size`, `readout`, `vector_mode`, `r2_std` (v1 per-feature target std for a v1-comparable R2), `paper_eval` (indices of the 100 test samples used by the v1 paper tables), `consistency` checks, ... |
+| `meta` | `dict` | `{}` | task defaults and diagnostics: `v1_C`, `batch_size`, `readout`, `vector_mode`, `r2_std` (v1 per-feature target std for a v1-comparable R2), `paper_eval` (indices of the 100 test samples of the paper tables, `test100`), `consistency` checks, ... |
 | `extra_tests` | `dict` | `{}` | additional evaluation sets normalised with the same statistics, e.g. `{'fine': {'K': [...], 'inputs': [...], 'target': [...]}}` (zero-shot resolution transfer). |
 | `output_map` | `OutputMap \| None` | `None` | optional `OutputMap` applied to the model output before the loss/metrics; `None` means the model output is compared with `target` directly. |
 | `readout` | `str \| None` | `None` | **the** readout the model is built with (single source of truth; `rhmp.train.build_config` uses it). `None` resolves once at construction to: the legacy `meta['model_readout']` if present, else `output_map.model_readout`, else `target_readout` (the readout that predicts `target` on its own cells). Examples: `'cochain:2'` + oriented face->node map for the pseudo-scalar node targets of T1/T6/T7, `'grad'` for the curl-free edge target of HPgrad. |
@@ -2187,7 +2599,7 @@ Attributes:
     native: native-cochain (True) or v1-legacy (False) inputs/outputs.
     meta: task defaults and diagnostics: ``v1_C``, ``batch_size``, ``readout``, ``vector_mode``,
         ``r2_std`` (v1 per-feature target std for a v1-comparable R2), ``paper_eval`` (indices of the 100 test
-        samples used by the v1 paper tables), ``consistency`` checks, ...
+        samples of the paper tables, ``test100``), ``consistency`` checks, ...
     extra_tests: additional evaluation sets normalised with the same statistics, e.g.
         ``{'fine': {'K': [...], 'inputs': [...], 'target': [...]}}`` (zero-shot resolution transfer).
     output_map: optional :class:`OutputMap` applied to the model output before the loss/metrics; ``None``
@@ -2740,7 +3152,7 @@ RHMPConfig for `task` from the CLI arguments and the task defaults.
 ```python
 model_output(task: TaskData, fwd, xb: dict, K) -> Tensor
 ```
-Model prediction in the task's target space (applies `task.output_map` when present).
+Model prediction in the task's target space (applies `task.output_map` when present; a map with `takes_complex = True` is called as `output_map(y, K)`, e.g. a per-mesh geometric map on block-diagonal batches of variable meshes).
 
 ### `batch_loss`
 
@@ -2813,6 +3225,13 @@ evaluate(
 ```
 `rhmp.metrics.summarize` of the predictions on `idx` (normalised pred/target + `task.y_stats`).
 
+### `needs_whitney`
+
+```python
+needs_whitney(model_cfg: dict) -> bool
+```
+Whether a saved model configuration uses the Whitney / Galerkin blocks of the complexes (tensor metrics, the energy readout, the energy amplitude, the field-energy invariant of Picard solve layers); the loaders drop them otherwise.
+
 ### `main`
 
 ```python
@@ -2838,10 +3257,37 @@ name    content (legacy = v1 exact inputs/outputs;  native = cochain inputs/outp
 T1      CNS vorticity, 32x32 grid (triangulated). legacy: (rho,Vx,Vy,p) at nodes. native: (rho,p) at nodes +
         velocity 1-form on edges ``V_e = (V_s+V_d)/2 . (x_d-x_s)``.  target: vorticity at nodes.
 T1q     T1 on the quad CW complex ``CochainComplex.from_grid(cell='quad')`` (same data, node order matched).
-T2      torus advection-diffusion, scalar -> scalar at nodes (legacy == native).
+T1qe    T1q with an additional even edge column (half-difference of the endpoint velocities along the edge).
+T1qn    T1qe with the oriented face circulation as an even face input and a vertex readout (no output map).
+T1p     T1 on its periodic grid (flat torus ``from_grid((32, 32), 1/32, periodic=True)``; the simulation and the
+        target stencil are periodic).  native: periodic quads with the T1qe inputs (wrap-around edges included,
+        minimal-image edge vectors).  legacy: v1 node inputs on the periodic triangulated grid (baselines).
+T1pm    native T1p + log rho and log p averaged to edges and faces as even columns (seen by the metric heads).
+T1pml   T1pm + (log rho, log p) as additional vertex inputs.
+T1pf    T1p (T1pmf: T1pm, T1pmlf: T1pml) on the same trajectories coarse-grained by 4 x 4 block averages instead of
+        strided subsampling (``datasets/v2/T1_cns_vorticity_blockavg.pkl``; aliasing analysis).
+T1g     T1 on a graded, anisotropic periodic 32x32 grid (nodes = a non-uniform subset of the 128x128 simulation grid,
+        spacings 1-8 fine cells, aspect ratios 1/8-8; ``datasets/v2/T1_cns_vorticity_graded.pkl``); target = the
+        fine-grid (spectral) vorticity at t+1 at the nodes.  native: T1p inputs on periodic quads, patch-area
+        normalised oriented face->node map; legacy: node inputs on the triangulated grid.  ``extra_tests``: zero-shot
+        grids U32, G2, U64, G1rot (100 paper-evaluation samples each).  T1gml: T1pml inputs (legacy: + vertex logs);
+        T1gml_mean: T1gml with the plain oriented face->node mean (native only); T1gmla: T1gml with the scale-dependent
+        geometry descriptors in one fixed length unit instead of relative to each mesh's median (native only).
+T2      torus advection-diffusion, scalar -> scalar at nodes (legacy == native).  The velocity, drawn anew for
+        every sample by the generator, is not an input: the target is not a function of the input.
+T2v     T2 with the velocity as an input (same mesh, samples, targets; ``datasets/v2/T2v.pt`` from
+        ``gen_T2v.py``).  native: f at nodes + velocity one-form (odd) and half-difference (even) on edges.
+        legacy: (f, Vx, Vy, Vz) at nodes.
+T2a     anisotropic transport on the T2 torus (``rhmp/tasks/torus.py``, ``gen_T2a.py``): divergence-free velocity,
+        field-aligned diffusion along helical field lines, ratio 1..100, accurate conservative reference.  native: f;
+        edge velocity one-form + half-difference + cos^2(t_e, b) + log t_e^T D t_e; face log D_par, log D_perp.
+        legacy: (f, Vx, Vy, Vz, bx, by, bz, log D_par, log D_perp) at nodes.
 T3      ellipsoid coexact flow psi -> v = n x grad psi.  node_vector readout in both modes; legacy keeps the v1
         per-component target normalisation (and v1-style ``direct`` vector readout), native uses isotropic scaling
         (E(n)-consistent) and the least-squares readout.
+T3g     T3 with the exact structure of its targets: readout ``grad`` (predict a stream function phi, w = d0 phi on
+        edges) + the fixed edge->vertex map of the generator (P1 face gradients averaged to the vertices, v = n x g).
+        Native only.
 T5      Maxwell/Poisson rho -> E.  legacy: 2 node scalars (v1). native: node_vector (``direct`` readout = the
         generator's definition E_i = mean_e E_e t_e), isotropic target scaling.
 T5g     T5 with the exact structure of its targets: readout ``grad`` (predict a potential phi, E_e = d0 phi on
@@ -2873,6 +3319,17 @@ Extension suite (``rhmp/tasks/suite.py``): SURF / SURF_heat (+ _geo / _topo tran
 _cons, _cons_mass), HP_qual_graded / HP_qual_sliver (+ _ref) and the anisotropy tasks of ``rhmp/tasks/aniso.py``
 (AHP, ASURF, ACURL, ADARCY) resolve through ``load_task`` as well (hook below; the paper tasks do not depend on those
 modules).
+
+AirfRANS tasks (``rhmp/tasks/airfrans.py``, generator ``datasets/generators/gen_airfrans.py``): T8 resolution views
+``T8_n500`` / ``T8_n2000`` / ``T8_n8000`` (test only), T8 with the chord frame (``T8fr``, ``T8xy``, ``T8frxy``) and the
+tasks on conforming near-field meshes (``AFV``, ``AFVp``, ``AFU``, ``AFUv``, ``AFD``, ...) resolve through the same hook.
+
+Maxwell tasks (``rhmp/tasks/maxwell.py``, generator ``datasets/generators/gen_maxwell.py``): ``MXS``, nonlinear
+magnetostatics of an EI-core electromagnet with saturable steel on one fixed mesh (vertex field B from currents and
+material phases), ``MXA``, its anisotropic version (grain-oriented / laminated steel with rolling directions, several
+layout families, a held-out family; generator ``gen_maxwell_aniso.py``; ablation ``MXA_noorient``), and ``MXE``,
+linear electrostatics of an electrical capacitance tomography sensor (vertex field E from electrode potentials, space
+charge and material phases).
 
 Synthetic tasks (``datasets/v2/*.pt``, generators in ``datasets/generators/gen_*.py``), variable meshes:
 
@@ -2935,7 +3392,7 @@ Returns:
 ```python
 list_tasks() -> list[str]
 ```
-Canonical task names (HP/TET accept further `_k<kappa>` / `_aniso` suffixes; extension-suite names (SURF*, DYN*, HP_qual_*, anisotropy tasks) are appended when `rhmp.tasks.suite` is importable).
+Canonical task names (HP/TET accept further `_k<kappa>` / `_aniso` suffixes; extension-suite names (SURF*, DYN*, HP_qual_*, anisotropy tasks) and the AirfRANS tasks (`rhmp.tasks.airfrans`) are appended when their modules are importable).
 
 ### `task_defaults`
 
@@ -2963,7 +3420,856 @@ lives in.
 
 ### Constants
 
-- `TASK_DEFAULTS`: dict with keys {'T1', 'T1q', 'T2', 'T3', 'T5', 'T5g', 'T6', 'T6f', 'T7', 'T7f', 'T8', 'T8v', ...}
+- `TASK_DEFAULTS`: dict with keys {'T1', 'T1q', 'T1qe', 'T1qn', 'T1p', 'T1pm', 'T1pml', 'T1pf', 'T1pmf', 'T1pmlf', 'T1g', 'T1gml', ...}
+
+
+## Torus transport task: `rhmp.tasks.torus`
+
+Anisotropic transport on the torus (T2a).
+
+<details><summary>module docstring</summary>
+
+```text
+Anisotropic scalar transport on the torus (task T2a; generator ``datasets/generators/gen_T2a.py``).
+
+``d_t u + div(v u) = div(D grad u)`` on the T2 torus with a divergence-free velocity (per-sample toroidal and poloidal
+amplitudes of T2 plus a random solenoidal perturbation) and field-aligned diffusion ``D = D_perp P + (D_par - D_perp)
+b b^T`` along helical field lines ``b`` (per-sample pitch, smoothly varying), anisotropy ratio ``D_par / D_perp`` in
+1..100; the T2 initial conditions; ``u(T)``, ``T = 0.2``, from an accurate conservative reference solver (P1 tensor
+diffusion, exactly divergence-free dual fluxes, Crank-Nicolson with 200 sub-steps).
+
+Inputs:
+
+* native (RHMP): degree 0 ``f``; degree 1 ``[theta, delta, cos^2(t_e, b), log(t_e^T D t_e)]`` (the velocity one-form
+  ``(V_s + V_d)/2 . (x_d - x_s)`` (odd), its half-difference (even, see ``rhmp.tasks.paper.t2v_inputs``), and the two
+  E(n)-invariant anisotropy descriptors (even; means over the incident faces)); degree 2 ``[log D_par, log D_perp]``
+  (even, constant per sample).  Suggested: ``--metric-ref 1:3`` (the projected diffusivity as the fixed offset of the
+  edge metric) and ``--material 1:2,2:2`` (the anisotropy columns reach only the metric heads), the full tensor metric,
+  and the transport term with ``metric='star'`` (geometric advective flux).
+* legacy (baselines): node features ``(f, Vx, Vy, Vz, bx, by, bz, log D_par, log D_perp)``.
+
+Target ``u(T)`` at the vertices.  Same split as T2 (sequential 70/15/15).  The zero-shot sets of the test split
+(velocity and anisotropy above the training ranges, roll-out to ``2T``, a 2x finer and a 2x coarser torus) are read
+by ``scripts/eval_torus_aniso.py`` through :func:`t2a_file` / :func:`t2a_inputs`.
+```
+
+</details>
+
+### `t2a_file`
+
+```python
+t2a_file(droot: str) -> dict
+```
+`datasets/v2/T2a.pt` (`datasets/generators/gen_T2a.py`).
+
+### `t2a_inputs`
+
+```python
+t2a_inputs(
+    X: Tensor,
+    V: Tensor,
+    b: Tensor,
+    cos2: Tensor,
+    logp: Tensor,
+    Dpar: Tensor,
+    Dperp: Tensor,
+    K,
+    native: bool,
+) -> dict[int, Tensor]
+```
+Raw (unnormalised) T2a inputs.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    X: ``(N, n0)`` initial field; V, b: ``(N, n0, 3)`` velocity and field direction at the vertices;
+    cos2, logp: ``(N, n1)`` edge descriptors; Dpar, Dperp: ``(N,)``; K: the complex of the mesh.
+    native: native cochain inputs (RHMP) or the legacy node features (baselines).
+```
+
+</details>
+
+### `t2a_complex`
+
+```python
+t2a_complex(points: Tensor, faces: Tensor, edges: Tensor, star: str, device)
+```
+Complex of a torus mesh of the generator and the map of the generator's edge data onto its edges.
+
+<details><summary>docstring</summary>
+
+```text
+Returns:
+    ``(K, perm)``: even edge data of the generator ``x (N, n1)`` are ``x[:, perm]`` in the complex's edge order.
+```
+
+</details>
+
+### `load_T2a`
+
+```python
+load_T2a(droot, *, native, device, star, **_)
+```
+T2a (see the module docstring): native `in_dims {0: 1, 1: 4, 2: 2}`, `even_dims {1: 3, 2: 2}`; legacy `in_dims {0: 9}`; node target.
+
+
+## Magnetostatics tasks: `rhmp.tasks.maxwell`
+
+Nonlinear (anisotropic) magnetostatics and electrostatics (MXS, MXA, MXE).
+
+<details><summary>module docstring</summary>
+
+```text
+Nonlinear magnetostatics task family MXS (generator ``datasets/generators/gen_maxwell.py``).
+
+Physics: 2-D cross-section of a three-limb EI-core electromagnet with saturable steel (Froehlich-Kennelly law,
+``mu_r,init = 3000``, ``J_s = 2.0 T``), three windings with independent signed current densities (|J| <= 6 A/mm^2),
+a movable and possibly tilted I-armature, random pole shoes and 0-2 external iron pieces, all on **one fixed mesh**
+(2,085 nodes; the movable iron is a per-face material indicator, i.e. staircase interfaces on a regular lattice band).
+Reference: P1 finite elements with damped Newton (``|R| <= 1e-10 |F|``) for ``-div(nu(|B|) grad A) = J``, ``A = 0`` on
+the box, ``B = (dA/dy, -dA/dx)``.  Units: mm, T, A/mm^2.  Split: sequential 70/15/15 of 5000 samples (train
+0..3499, validation 3500..4249, test 4250..4999), ``meta['paper_eval']`` = 4250..4349 ("test100").
+
+==========  ========================================================================================================
+name        content
+==========  ========================================================================================================
+MXS         target: vertex flux density ``B_i`` (T, 2 components) = area-weighted mean over the incident triangles of
+            the element fields ``B_f``.  native (RHMP): vertex current density ``J_i`` (lumped: ``M J = F``, the
+            consistent load of the element-wise current), even edge columns = phase fractions of the incident faces
+            (air, copper, iron), even face columns = phase one-hot (material columns for solver mode); readout
+            ``grad`` (``Phi = d0 phi``: edge fluxes of B, exactly closed, ``d1 Phi = 0``) followed by the fixed map
+            :class:`FluxToNodeField` (``B_i = R_-90`` of the area-weighted mean element gradient).  legacy (node
+            baselines): vertex ``(J_i, f_air, f_copper, f_iron)`` with ``f`` the phase fractions of the barycentric dual
+            cell -> vertex ``(B_x, B_y)``.  Target scaling: one isotropic RMS (rotation-consistent) in both modes.
+==========  ========================================================================================================
+
+Secondary family ``MXE`` (:func:`load_mxe`): linear electrostatics of an electrical capacitance tomography sensor
+(eight electrodes at random potentials as holes of the mesh, grounded screen, insulating pipe wall, oil / water / gas
+flow pattern with permittivity contrast 80, space charge), target ``E = -grad phi`` at the vertices; same split,
+extra sets and protocol; the solve layer takes the electrode potentials as inhomogeneous Dirichlet data
+(``solve_bc='lift'``).
+
+Anisotropic family ``MXA`` (:func:`load_mxa`, generator ``datasets/generators/gen_maxwell_aniso.py``): grain-oriented
+(easy : hard permeability 25) and laminated (5) steel with a rolling direction per piece, non-oriented steel, E-I / U-I
+electromagnets and shunt transformers with random dimensions, gaps, constructions and windings on one fixed lattice
+mesh; models receive phase indicators and the rolling direction (RHMP: E(n)-invariant edge columns, baselines: frame
+components), never the law; extra sets ``ood15``, ``fine``, ``coarse`` and ``heldout`` (a layout family absent from
+training).
+
+Extra test sets (``extra_tests``; list format, one complex per sample): ``ood15`` (test samples 4250..4749 with all
+currents x1.5, base mesh), ``fine`` (the same 500 samples on a refined mesh, 7,953 nodes) and ``coarse`` (566 nodes);
+each also as ``<name>_test100`` (its first 100 samples = the test100 instances).  No model ever sees the reluctivity:
+the constitutive law has to be learned from the field data.
+```
+
+</details>
+
+### `mxs_task_defaults`
+
+```python
+mxs_task_defaults(name: str) -> dict
+```
+Training defaults (`C`, `layers`, `batch`).
+
+### class `FluxToNodeField`
+
+```python
+FluxToNodeField(base=None, scale: float = 100.0, field: str = 'curl')
+```
+Edge fluxes `Phi = d0 A` (flux of B through each edge, right normal of src -> dst) -> vertex fields `B_i = sum_{f ∋ i} |f| R grad_f(A) / sum_{f ∋ i} |f|` with `R (gx, gy) = (gy, -gx)` (`B = curl A e_z`), times the fixed unit length `scale` (mm).  `field='grad'`: potential differences `d0 phi` -> `E_i = -sum |f| grad_f(phi) / sum |f|` (`E = -grad phi`, a true vector; task MXE).
+
+<details><summary>docstring</summary>
+
+```text
+``grad_f(A) = s_0 Phi_{e0} g_1 - s_2 Phi_{e2} g_2`` from the two face edges at local vertex 0 (``g_k`` the P1
+barycentric gradients, ``s_j`` the face-edge orientation signs of ``K.meta``): a fixed linear map that depends only on
+differences of A (exact for the generator's targets), on the geometry and on the orientation of the plane (B is a
+pseudo-vector), not on vertex labels or edge / face orientation conventions.  Computed per complex (block-diagonal
+batches of meshes, rotated or refined meshes); ``takes_complex = True``.  Called without a complex it uses the
+task's own mesh (``base``), so linear-readout fits work unchanged.  Output ``(n0, B, 2)``.
+```
+
+</details>
+
+#### `FluxToNodeField.matrix`
+
+```python
+matrix(K) -> tuple[Tensor, Tensor]
+```
+CSR `(2 n0, n1)` (rows `2 i + c`) and its transpose, float32 on `K`'s device (cached per complex).
+
+#### `FluxToNodeField.to`
+
+```python
+to(device) -> FluxToNodeField
+```
+### `reluctivity`
+
+```python
+reluctivity(B)
+```
+Reluctivity `nu = H / B` (m/H) of the steel (numpy or torch, `B >= 0` in T): the explicit inverse of the Froehlich-Kennelly law `B = mu0 H + Js H / (Hk + H)` (identical to the generator's `nu_iron`).
+
+### `load_mxs`
+
+```python
+load_mxs(
+    name: str,
+    droot: str,
+    *,
+    native: bool = True,
+    device='cuda',
+    star: str = 'cotan',
+    fine: bool = True,
+    max_samples: int | None = None,
+    whitney: bool = True,
+    output_map=None,
+    **_,
+) -> TaskData
+```
+Task `MXS` (see the module docstring).
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    native: RHMP inputs (vertex current, edge / face phase columns; ``grad`` readout + :class:`FluxToNodeField`)
+        or the node inputs of the baselines.
+    fine: also load the extra test sets (``ood15``, ``fine``, ``coarse`` and their ``*_test100`` subsets).
+    max_samples: smoke tests: keep ``max_samples // 3`` samples of every split part.
+    output_map: ``False`` drops the output map (the model must then predict the vertex field directly).
+```
+
+</details>
+
+### `load_mxe`
+
+```python
+load_mxe(
+    name: str,
+    droot: str,
+    *,
+    native: bool = True,
+    device='cuda',
+    star: str = 'cotan',
+    fine: bool = True,
+    max_samples: int | None = None,
+    whitney: bool = True,
+    output_map=None,
+    **_,
+) -> TaskData
+```
+Task `MXE`: electrical capacitance tomography sensor (8 electrodes at random potentials on an insulating pipe, grounded screen, oil / water / gas flow pattern with permittivities 2.2 / 80 / 1, wall 3.5, triboelectric space charge), `-div(eps grad phi) = rho / eps_0`, target `E = -grad phi` at the vertices (V/mm).
+
+<details><summary>docstring</summary>
+
+```text
+native: vertex ``(q, V)`` (lumped space charge rho/eps_0, 0 on the fixed vertices; electrode potential on the
+electrode outlines, 0 elsewhere: the Dirichlet data), even edge / face phase columns (5 phases); readout ``grad``
+(``d0 phi``, exactly curl-free) + :class:`FluxToNodeField` with ``field='grad'``.  The electrode outlines and the
+screen are the mesh boundary (``K.boundary[0]``; electrodes are holes), i.e. the fixed cells of ``solve_bc='lift'``.
+legacy: vertex ``(q, V, dual-cell phase fractions)`` -> vertex ``(E_x, E_y)``.  Same split / extra sets as MXS.
+```
+
+</details>
+
+### `load_mxa`
+
+```python
+load_mxa(
+    name: str,
+    droot: str,
+    *,
+    native: bool = True,
+    device='cuda',
+    star: str = 'cotan',
+    fine: bool = True,
+    max_samples: int | None = None,
+    whitney: bool = True,
+    output_map=None,
+    orientation: bool = True,
+    **_,
+) -> TaskData
+```
+Task `MXA`: nonlinear magnetostatics with grain-oriented (GO, easy : hard permeability 25) and laminated (LAM, 5) steel with a rolling direction per piece, non-oriented steel (NO), air and copper, in E-I and U-I electromagnets and shunt transformers of random dimensions, gaps, constructions and windings, all on one fixed lattice mesh (1,818 nodes; generator `datasets/generators/gen_maxwell_aniso.py`).  Target: vertex B (T).
+
+<details><summary>docstring</summary>
+
+```text
+native (RHMP): vertex current density (lumped), even edge columns ``(f_air, f_copper, f_NO, f_GO, f_LAM,
+cos^2(edge, rolling direction) over the incident GO faces, the same over the incident LAM faces)`` (E(n)-invariant:
+the edge and the rolling direction rotate together), even face columns = phase one-hot; readout ``grad`` +
+:class:`FluxToNodeField`.  legacy (node baselines): vertex ``MXA_LEGACY_COLUMNS`` (current, dual-cell phase
+fractions, dual-cell (cos 2phi, sin 2phi) of the GO and LAM rolling directions: frame components, which rotate
+with the configuration, ``meta['frame_pairs']``).  Isotropic target scaling.  Split: sequential 70/15/15 of 5000,
+test100 = 4250..4349.  Extra tests (list format): ``ood15`` (test samples 4250..4749 with all currents x1.5),
+``fine`` / ``coarse`` (the same layouts on the 4 mm / 16 mm meshes, 7,255 / 459 nodes), ``heldout`` (500 samples
+of the EE family, which never occurs in training), each also as ``<name>_test100`` (the test100 layouts; for
+``heldout`` its first 100 samples).  ``orientation=False`` (task ``MXA_noorient``, an ablation) drops the
+rolling-direction columns (native: the two cos^2 edge columns; legacy: the four frame columns).
+```
+
+</details>
+
+### `face_onehot`
+
+```python
+face_onehot(phase: Tensor) -> Tensor
+```
+`(..., n2)` int phase -> `(..., n2, 3)` float one-hot (air, copper, iron).
+
+### `triangle_areas`
+
+```python
+triangle_areas(K) -> Tensor
+```
+`(n2,)` unsigned triangle areas (float64, units of `K.pos` squared).
+
+### `edge_directions`
+
+```python
+edge_directions(K) -> Tensor
+```
+`(n1, 2)` unit edge vectors (float64; the sign is irrelevant for the squared cosines).
+
+### `rotate_frame_columns`
+
+```python
+rotate_frame_columns(x: Tensor, stats, pairs, theta) -> Tensor
+```
+Normalised node inputs `x (..., F)` of a configuration rotated by `theta` (radians; a number or a tensor broadcastable to `x[..., 0]`): every column pair `(i, j)` in `pairs` holds `(cos 2 phi, sin 2 phi)` frame components (in physical units) and turns by `2 theta`; the other columns are unchanged.
+
+### Constants
+
+- `MXS_TASKS`: dict with keys {'MXS', 'MXE', 'MXA', 'MXA_noorient'}
+- `MXS_DEFAULTS`: dict with keys {'MXS'}
+- `PHASE_NAMES`: ('air', 'copper', 'iron')
+- `ECT_PHASES`: ('air', 'wall', 'oil', 'water', 'gas')
+- `MXA_PHASES`: ('air', 'copper', 'NO', 'GO', 'LAM')
+- `MU0`: 1.2566370614359173e-06
+- `NU0`: 795774.7154594767
+- `JS`: 2.0
+- `MUR_INIT`: 3000.0
+- `HK`: 530.6933747645726
+
+
+## AirfRANS tasks: `rhmp.tasks.airfrans`
+
+Pressure / velocity tasks on body-fitted meshes (AFP*, AFV*, AFU*, AFD, T8*).
+
+<details><summary>module docstring</summary>
+
+```text
+AirfRANS task family (generator ``datasets/generators/gen_airfrans.py``; data from the AirfRANS RANS simulations).
+
+All tasks keep the simulation order and the partition of the paper's T8 task: simulations 0..699 are the training
+part (normalisation statistics; the loaders hold out 630..699 for model selection, as T8), 700..999 the test part, and
+``meta['paper_eval']`` = simulations 850..949 ("test100", the paper's table).  Lengths are in chords, velocities in
+m/s, pressures in Pa, vorticities in 1/s, the angle of attack in radians.
+
+==================  =========================================================================================  ======
+name                content                                                                                   mesh
+==================  =========================================================================================  ======
+T8_n500/2000/8000   test-only resolution views of T8: the same construction (uniform random CFD nodes,         T8res
+                    Delaunay of the convex hull) with 500 / 2000 / 8000 nodes on the 300 test simulations
+                    (nested point sets: the prefixes of T8's random permutations; n2000 reproduces the T8
+                    test split exactly); x = (sdf, U, a), y = p; ``extra_tests['test100']``.
+T8i                 T8 with the AFPi inputs (node (sdf, a), edge inflow 1-form + mean sdf, face mean sdf) and   T8
+                    the AFPi output map; native only.
+T8fr / T8xy /       T8 (same meshes, split, target and normalisation) with the frame that the gauge-CNN        T8
+T8frxy              baselines see through their edge angles: ``fr`` = odd edge 1-forms (inflow
+                    ``U (cos a dx + sin a dy)``, ``dx_e``, ``dy_e``), ``xy`` = chord-frame coordinates (x, y)
+                    as two more node columns (all models).
+AFV                 vorticity on conforming near-field meshes, Stokes target: the mean vorticity of the CFD    AFM
+                    field over the star of every vertex, ``sum_{f ∋ i} sigma_f (d1 theta)_f / sum_{f ∋ i}
+                    A_f`` with ``theta_e = int_e u.dl`` (accurate line integrals of the CFD velocity; Stokes:
+                    ``(d1 theta)_f`` is the integral of the vorticity over triangle f).  native: node (sdf, U, a),
+                    edge theta as a gauge connection (the model sees only d1 theta: exact invariance under
+                    u -> u + grad lambda); readout ``cochain:2`` + the fixed area-weighted oriented face ->
+                    vertex map.  legacy (node baselines): node (Vx, Vy, sdf, U, a) of the CFD.
+AFVp                as AFV, target = the CFD point vorticity at the vertices (wall: the wall vorticity).       AFM
+AFV_trap /          equal-information variants: theta = the trapezoid rule of the nodal CFD velocities (the     AFM
+AFVp_trap           information the node baselines get); AFV_trap's target is then the star average of the
+                    P1 curl of the nodal velocities (the discrete Stokes target of the T1 / v1 vorticity data).
+AFU                 velocity flux 1-cochain ``F_e = int_e u.n ds`` (n = right normal of src -> dst; accurate    AFM
+                    quadrature, closed per triangle to ~1e-4 for the incompressible CFD field).  native: node
+                    (sdf, U, a, x, y), edge inflow 1-form; readout ``grad`` (F = d0 psi: exactly closed,
+                    zero net flux out of every triangle).  legacy: node (sdf, U, a, x, y) -> node (Vx, Vy).
+AFUv                native AFU inputs and ``grad`` readout, trained on the node velocities through the fixed   AFM
+                    map F -> u (least-squares gradient of psi at every vertex, rotated: u = (psi_y, -psi_x);
+                    u = 0 at wall vertices, the no-slip condition).
+AFP / AFPfr /       pressure on the conforming meshes (the geometry-respecting counterpart of T8): node         AFM
+AFPxy / AFPfrxy     (sdf, U, a); ``fr``: + odd edge 1-forms (inflow, dx, dy; native only); ``xy``: + chord-frame
+                    coordinates as node columns (all models).
+AFPi / AFPi0 /      pressure with the inflow in its covariant form (dynamic similarity).  native: node (sdf, a)  AFM
+AFPiU / AFPiR /     [AFPi0: (sdf); AFPiU: (sdf, U, a); AFPiR: (sdf, a, log U)], edge inflow 1-form
+AFPs                ``theta_e = u_inf . (x_dst - x_src)`` (odd; the amplitude column of ``--amplitude 1:1``) and the
+                    mean sdf of the edge / face vertices as even edge / face columns (seen by the metric heads).
+                    AFPs: no 1-form, node (U, sdf, a) with U as the amplitude column (``--amplitude 0:1``).  The
+                    complexes carry ``meta['dirichlet'] = {0: outer-ring vertices}`` and ``meta['cohomology'] = {1:
+                    generator of H^1 of the annulus}`` for projection layers.  Target and normalisation are those of
+                    AFP (raw pressure, mean / std of simulations 0..699); AFPi / AFPi0 / AFPiR / AFPs add the fixed
+                    output map ``y -> y - mean / std`` so that a model with the output factor ``s^2`` (``--amplitude``
+                    ``--amplitude-power 2 --amplitude-energy``) is exactly homogeneous of degree two in the inflow in
+                    physical units.  legacy (node baselines): node (sdf, U, a), i.e. AFP.
+AFPpf               control: AFP with the Bernoulli pressure of the P1 potential flow with the Kutta condition    AFM
+                    (:func:`potential_reference`: reference metric, no learning) as a fourth node column
+                    ``(sdf, U, a, p_ref)`` for every model; target and normalisation of AFP.
+AFPcp / AFPcpxy     controls: target = pressure coefficient ``p / (U^2 / 2)`` (mean / std normalisation); legacy   AFM
+                    node (sdf, U, a) [AFPcpxy: + chord-frame (x, y)]; native: the AFPi inputs, no output map.
+                    Predictions are converted to physical units by ``scripts/airfrans_pressure_eval.py``.
+AFD                 derived diffusion task: P1 FEM solution of -div(kappa grad T) = f, T = 0 on the airfoil    AFM
+                    and the outer ring, kappa = 1 + nu_t / nu of the simulation (the RANS eddy-viscosity
+                    ratio, contrast up to ~1e3), f = random Gaussian sources.  The solution is computed by the
+                    generator; only the meshes and kappa come from AirfRANS.  native: node f, even edge / face
+                    log kappa (material columns for solver mode); legacy: node (f, mean log kappa).
+==================  =========================================================================================  ======
+
+The conforming tasks have ``extra_tests['fine']`` (the 300 test simulations on meshes with about 3.6x the nodes, same
+construction with h halved, independent random nodes; zero-shot resolution transfer) and ``'fine_test100'``, and, when
+``AFM_coarse.pt`` exists, ``'coarse'`` / ``'coarse_test100'`` (h doubled, about 0.3x the nodes).
+```
+
+</details>
+
+### `airfrans_task_defaults`
+
+```python
+airfrans_task_defaults(name: str) -> dict
+```
+Training defaults (`C`, `layers`, `batch` = meshes per block-diagonal batch).
+
+### class `StarAverageMap`
+
+```python
+StarAverageMap(out_dim: int = 1, scale: float = 1.0)
+```
+Oriented face 2-cochain -> vertex density: `y_i = A_ref sum_{f ∋ i} sigma_f c_f / sum_{f ∋ i} |A_f|`.
+
+<details><summary>docstring</summary>
+
+```text
+``sigma_f`` is the sign of the signed area (+1 for counter-clockwise faces, the physical orientation of the plane).
+For a face circulation ``c = d1 theta`` this is the mean vorticity over the star of vertex i (Stokes; the interior
+edges of the star cancel).  ``A_ref`` is a fixed constant that only sets the units of the model output (the loaders
+use the median star area of the training meshes, so that predictions at initialisation scale like the targets).  Parameter free and linear; computed from the batch complex (block-diagonal batches of
+different meshes), so ``takes_complex = True`` (``rhmp.train.model_output`` passes the complex).
+```
+
+</details>
+
+#### staticmethod `StarAverageMap.weights`
+
+```python
+weights(K) -> tuple[Tensor, Tensor, Tensor]
+```
+#### `StarAverageMap.to`
+
+```python
+to(device) -> StarAverageMap
+```
+### class `FluxVelocityMap`
+
+```python
+FluxVelocityMap(model_readout: str = 'grad', scale: float = 1.0)
+```
+Edge flux 1-cochain `F = d0 psi` (`F_e = int_e u.n ds`, n = right normal) -> vertex velocities.
+
+<details><summary>docstring</summary>
+
+```text
+At every vertex the gradient of the stream function is the least-squares fit ``g_i = argmin sum_{e ∋ i}
+(g . dx_e - dpsi_e)^2 / |dx_e|^2`` over the incident edges (``dpsi_e = +-F_e``, oriented away from i), and
+``u_i = (g_y, -g_x)``; wall vertices (:func:`wall_vertices`) get ``u = 0`` (the no-slip condition).  ``scale`` is a
+fixed unit factor (a data-set constant).  Fixed and linear; per batch from the complex (``takes_complex = True``).
+Output ``(n0, B, 2)``.
+```
+
+</details>
+
+#### staticmethod `FluxVelocityMap.operator`
+
+```python
+operator(K) -> tuple[Tensor, Tensor, Tensor, Tensor]
+```
+`(rows, cols, vals)` of the `(2 n0, n1)` matrix and the wall mask (float64).
+
+#### `FluxVelocityMap.to`
+
+```python
+to(device) -> FluxVelocityMap
+```
+### class `OffsetMap`
+
+```python
+OffsetMap(offset: float, scale: float = 1.0, model_readout: str = 'node_scalar', out_dim: int = 1)
+```
+Fixed affine output map `y -> scale * y + offset` (constants of the task).  With `offset = -mean / std` of a mean / std normalised target, a model whose raw output is homogeneous in an input amplitude stays exactly homogeneous in physical units (`std * scale * y_model`) while the loss and the metrics use the task's normalised target; `scale` is a unit factor (the loaders choose it so that the amplitude factor of the model output is of order one on the training simulations).
+
+#### `OffsetMap.to`
+
+```python
+to(device) -> OffsetMap
+```
+### `wall_vertices`
+
+```python
+wall_vertices(K) -> Tensor
+```
+`(n0,)` bool: boundary vertices on the airfoil.  Every AirfRANS airfoil has its chord on [0, 1] x {0} and the outer boundary of the near-field meshes is at distance 0.5 from it, so the airfoil boundary vertices are the boundary vertices in the box (-0.25, 1.25) x (-0.35, 0.35) (checked against the generator's flags by the loader).  Works on block-diagonal batches.
+
+### `afm_eval_source`
+
+```python
+afm_eval_source(
+    task: str,
+    droot: str,
+    x_stats: dict,
+    y_stats: Stats,
+    *,
+    base: str = 'AFM',
+    ids=None,
+    native: bool = True,
+    star: str = 'cotan',
+    whitney: bool = False,
+    rotate: float = 0.0,
+) -> dict
+```
+One evaluation set of a conforming-mesh task, built on the CPU with the statistics of a trained run.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    task: AFM task name; droot: datasets directory; x_stats / y_stats: the run's statistics (CPU).
+    base: ``'AFM'`` (ids = simulation indices), ``'AFM_fine'`` or ``'AFM_coarse'`` (ids = positions in that file).
+    ids: samples of the file (default: the simulations 850..949, "test100").
+    rotate: rigid rotation of the whole configuration in degrees (mesh and inflow; scalar inputs unchanged).
+Returns:
+    dict with ``K``, ``inputs``, ``target`` (lists, normalised), ``kind`` (vertex kinds: 0 volume, 1 wall, 2 outer
+    ring), ``pos0`` (chord-frame positions), ``U``, ``aoa``, ``src`` (simulation indices), and the raw CFD fields
+    ``theta_cfd`` (accurate edge circulations of the velocity), ``p`` and ``sdf``.
+```
+
+</details>
+
+### `afp_output_map`
+
+```python
+afp_output_map(task: str, x_stats: dict, y_stats: Stats, u2_ref: float)
+```
+The fixed output map of a covariant pressure task for given statistics (`None` for tasks without one).
+
+<details><summary>docstring</summary>
+
+```text
+Unit factor: the amplitude column (the inflow 1-form, or U for AFPs) is normalised by its RMS ``c`` over the
+training cells, so the output factor of the model is ``(U / c)^2``; with ``scale = c^2 / u2_ref`` (``u2_ref`` = the
+mean squared inflow speed of the training simulations) it becomes ``U^2 / u2_ref``, of order one.
+```
+
+</details>
+
+### `load_t8_inflow`
+
+```python
+load_t8_inflow(
+    name: str,
+    droot: str,
+    *,
+    native: bool = True,
+    device='cuda',
+    star: str = 'cotan',
+    cache: bool = True,
+    max_samples: int | None = None,
+    whitney: bool = True,
+    **_,
+) -> TaskData
+```
+`T8i`: T8 (meshes, split, target, normalisation and test100 of `rhmp.tasks.paper.load_T8`) with the inputs of `AFPi`: node (sdf, a), edge inflow 1-form `theta_e = u_inf . (x_dst - x_src)` (odd, the amplitude column) and the mean sdf of the edge / face vertices (even), and the fixed output map of `afp_output_map`.  The T8 meshes are Delaunay triangulations of the convex hull of random CFD nodes: the airfoil is not a boundary of the complex, so there is no wall condition and no cohomology generator (projection layers fix the hull vertices).  Native only (the node baselines use `T8`).
+
+### `potential_reference`
+
+```python
+potential_reference(K, r: dict) -> Tensor
+```
+Bernoulli pressure `(U^2 - |u|^2) / 2` of the P1 potential flow around the airfoil with the Kutta condition, without any learning (the reference of `scripts/airfrans_potential_reference.py` computed with the library's operators in float64): the inflow 1-form is projected with the reference star (no flux through the wall, perturbation potential zero on the outer ring), the circulation along the harmonic cochain is fixed by the Kutta condition on the two wall edges at the trailing-edge vertex (the wall vertex of largest chord-frame x), and `|u|^2` is the Galerkin energy density at the vertices.  `K` must carry its Whitney blocks.  `(n0,)`.
+
+### `load_t8res`
+
+```python
+load_t8res(
+    name: str,
+    droot: str,
+    *,
+    n_pts: int,
+    native: bool = True,
+    device='cuda',
+    star: str = 'cotan',
+    max_samples: int | None = None,
+    whitney: bool = True,
+    keep_on: str = 'auto',
+    forms: bool = False,
+    xy: bool = False,
+    **_,
+) -> TaskData
+```
+Test-only view `T8_n<n_pts>` (300 test simulations; `extra_tests['test100']` = sources 850..949).
+
+<details><summary>docstring</summary>
+
+```text
+``xy`` / ``forms``: the inputs of ``T8xy`` / ``T8fr`` (chord-frame coordinates as node columns; odd edge 1-forms),
+for zero-shot tests of models trained on those tasks.  Inputs / targets are normalised with the T8 statistics
+(stored by the generator; the frame columns with statistics of these meshes); ``rhmp.train --eval-ckpt``
+re-normalises with the statistics of the evaluated run anyway.
+```
+
+</details>
+
+### `load_t8_frame`
+
+```python
+load_t8_frame(
+    name: str,
+    droot: str,
+    *,
+    forms: bool,
+    xy: bool,
+    native: bool = True,
+    device='cuda',
+    star: str = 'cotan',
+    cache: bool = True,
+    max_samples: int | None = None,
+    whitney: bool = True,
+    **_,
+) -> TaskData
+```
+T8 (meshes, split, target, normalisation and test100 of `rhmp.tasks.paper.load_T8`) with the chord frame.
+
+<details><summary>docstring</summary>
+
+```text
+``forms``: odd edge 1-forms ``[U (cos a dx + sin a dy), dx_e, dy_e]`` (native only; scale-normalised with the RMS
+of the first 700 samples).  ``xy``: chord-frame coordinates (x, y) appended to the node inputs (every model; in
+legacy mode the node inputs are ``(sdf, U, a, x, y)``).
+```
+
+</details>
+
+### `load_afm`
+
+```python
+load_afm(
+    name: str,
+    droot: str,
+    *,
+    task: str,
+    native: bool = True,
+    device='cuda',
+    star: str = 'cotan',
+    fine: bool = True,
+    max_samples: int | None = None,
+    whitney: bool = True,
+    keep_on: str = 'auto',
+    connection: bool = True,
+    output_map=None,
+    rotate: float = 0.0,
+    **_,
+) -> TaskData
+```
+Tasks on the conforming near-field meshes (see the module docstring).
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    task: ``'AFV' | 'AFVp' | 'AFV_trap' | 'AFU' | 'AFUv' | 'AFD'``.
+    connection: AFV*: the circulation 1-form enters as a gauge connection (only ``d1 theta`` reaches the model);
+        ``False``: as an ordinary odd edge input.
+    fine: also load ``extra_tests['fine']`` / ``['fine_test100']`` (4x meshes of the test simulations).
+```
+
+</details>
+
+### `flux_divergence`
+
+```python
+flux_divergence(K, F: Tensor) -> Tensor
+```
+Net outward flux of every triangle, `(d1 F)_f * sigma_f` (`(n2,)` or `(n2, B)`): zero for an exactly conservative (closed) flux cochain.
+
+### `trapezoid_flux`
+
+```python
+trapezoid_flux(pos: Tensor, edges: Tensor, u: Tensor) -> Tensor
+```
+`F_e = (u_src + u_dst)/2 . n_e |e|` with `n` the right normal of `src -> dst`: `(n1,)` (or `(n1, B)` for `u` of shape `(n0, B, 2)`).
+
+### `edge_flux_of_nodes`
+
+```python
+edge_flux_of_nodes(pos: Tensor, edges: Tensor, u: Tensor) -> Tensor
+```
+`F_e = (u_src + u_dst)/2 . n_e |e|` with `n` the right normal of `src -> dst`: `(n1,)` (or `(n1, B)` for `u` of shape `(n0, B, 2)`).
+
+### Constants
+
+- `AIRFRANS_TASKS`: dict with keys {'T8_n500', 'T8_n2000', 'T8_n8000', 'T8fr_n500', 'T8fr_n2000', 'T8fr_n8000', 'T8xy_n500', 'T8xy_n2000', 'T8xy_n8000', 'T8frxy_n500', 'T8frxy_n2000', 'T8frxy_n8000', ...}
+- `AIRFRANS_DEFAULTS`: dict with keys {'T8res', 'T8f', 'AF'}
+- `AFP_NATIVE`: dict with keys {'AFPi', 'AFPi0', 'AFPiU', 'AFPiR', 'AFPs', 'AFPcp', 'AFPcpxy'}
+
+
+## Anisotropy task suite: `rhmp.tasks.aniso`
+
+AHP, ASURF, ACURL, ADARCY loaders and structure metrics.
+
+<details><summary>module docstring</summary>
+
+```text
+Anisotropy task suite: PDEs whose operator is the Whitney/Galerkin Hodge star of a misaligned SPD material tensor
+(generator ``datasets/generators/gen_aniso.py``; equations, discretisations, sizes and protocol in
+``docs/ANISO_TASKS.md``).
+
+===============  ===============  ================================================================  ====================
+name             data file        inputs by degree (odd columns first, even last)                    target (readout)
+===============  ===============  ================================================================  ====================
+AHP_r<R>         AHP_r<R>         0: f | 1: log t^T S t (e) | 2: log det S, log ratio S (e)          u nodes
+                                                                                                     (node_scalar)
+ASURF_r<R>       ASURF_r<R>       as AHP, closed surfaces in 3-D (tangent-plane fibre tensor)       u (node_scalar)
+ASURF_heat_r<R>  ASURF_r<R>       as ASURF                                                           heat flow u_T
+                                                                                                     (node_scalar)
+ACURL_r<R>       ACURL_r<R>       1: j (odd source 1-cochain), log t^T nu t (e) |                   A edges (cochain:1)
+                                  2: log n^T nu n (e) | 3: log det nu, log ratio nu (e)
+ACURLb_r<R>      ACURL_r<R>       as ACURL                                                           B = d1 A faces
+                                                                                                     (curl: d2 B = 0)
+ADARCY_r<R>      ADARCY_r<R>      0: f | 1: log t^T K t (e) | 2: log n^T K^-1 n (e) |               J face fluxes
+                                  3: F_T = int_T f (odd), log det K, log ratio K (e)                (cochain:2)
+ADARCYp_r<R>     ADARCY_r<R>      as ADARCY                                                          p nodes
+                                                                                                     (node_scalar)
+===============  ===============  ================================================================  ====================
+
+``R`` in {10, 100} (maximal eigenvalue ratio; the ratio fades to 1 only near the zeros of the direction field).
+Variable meshes (one complex per sample, block-diagonal batches), sequential 70/15/15 split, statistics from the
+training part (``TaskData.from_arrays``: odd columns / odd targets scale-only, even and vertex columns mean/std),
+``extra_tests['fine']`` = the first test samples re-solved on meshes with 4x the nodes (same physical instances),
+ASURF also ``test_<family>``.  Triangle complexes use ``star`` (default ``cotan``), tetrahedral complexes
+``barycentric`` when ``cotan`` is requested.  ``spatial_dim`` is 2 (AHP) or 3.
+
+``meta['metric_ref']`` suggests the trainer's ``--metric-ref`` for the degree whose metric carries the material
+(``1:0`` edges for the scalar problems, ``2:0`` faces for the 2-form problems), ``meta['recovery']`` tells
+``scripts/metric_recovery.py`` which stored tensor each learned metric should be compared with, and
+``meta['representability']`` summarises the generator's per-cell diagnostics.  :func:`structure_metrics` evaluates
+the physics residuals of a model's predictions (discrete PDE residual, boundary conditions, conservation, d2 B = 0).
+```
+
+</details>
+
+### `aniso_task_defaults`
+
+```python
+aniso_task_defaults(name: str) -> dict
+```
+Training defaults (`C`, `layers`, `batch` = meshes per block-diagonal batch).
+
+### `parse_name`
+
+```python
+parse_name(name: str) -> tuple[str, int]
+```
+`'ACURLb_r100' -> ('ACURLb', 100)` (an optional `_n<N>` subset suffix is ignored here).
+
+### `load_aniso`
+
+```python
+load_aniso(
+    name: str,
+    droot: str | None = None,
+    *,
+    native: bool = True,
+    device='cuda',
+    star: str = 'cotan',
+    fine: bool = True,
+    max_samples: int | None = None,
+    keep_on: str = 'auto',
+    n_samples: int | None = None,
+    fine_max: int | None = None,
+    whitney: bool = True,
+    **_,
+) -> TaskData
+```
+Load an anisotropy task (see the module table) as a normalised `TaskData`.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    name: e.g. ``'ASURF_r100'``, ``'ACURLb_r10'``; the suffix ``_n<N>`` (registered for the tet tasks:
+        ``_n1500``) uses only the first ``N`` samples of the file with the standard sequential 70/15/15 split,
+        i.e. the data set that ``gen_aniso.py --n N`` would have produced (the 4x ``fine`` set is unchanged).
+        A tet complex with Whitney blocks takes ~45 MB (~14 MB without, for diagonal metrics), so the 3000-sample
+        tet sets need ~137 GB of host memory for tensor-metric runs; ``_n1500`` needs ~68 GB.
+    droot: repository root or datasets directory (``None``: ``rhmp.tasks.resolve_root``).
+    native: must be True (the cochain inputs/targets are the task definition).
+    device: device of the statistics (and of the data when it fits ``rhmp.tasks.synthetic.GPU_BUDGET_GB``).
+    star: reference star of triangle complexes (tets: ``barycentric`` when ``cotan`` is requested).
+    fine: also build the 4x-finer ``fine`` extra test set.
+    fine_max: at most this many ``fine`` samples (default: all for triangle tasks, 50 for tet tasks, whose 4x
+        complexes take ~170 MB each with Whitney blocks).
+    max_samples: smoke tests (first ``max_samples // 3`` samples of each split part; ``fine`` truncated too).
+    keep_on: ``'auto' | device | 'cpu'``: where the complexes and tensors live.
+    whitney: keep the Whitney/Galerkin blocks (needed by tensor metrics only); ``False`` drops them per complex
+        while building, which keeps the host-memory peak low (``rhmp.tasks.load_task(..., whitney=False)``
+        forwards the option).
+```
+
+</details>
+
+### `structure_metrics`
+
+```python
+structure_metrics(
+    model,
+    task: TaskData,
+    *,
+    source: dict | None = None,
+    idx=None,
+    n: int = 32,
+    batch_size: int = 4,
+    device=None,
+    targets: bool = True,
+) -> dict
+```
+Physics residuals of a model's predictions on an anisotropy task (see `task.meta['structure']`).
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    model: called as ``model(inputs, K)`` (normalised output; the task's ``readout``).
+    source: evaluation set ``{'K', 'inputs', 'target', 'source', 'sample_ids'}`` (default: the task's test split;
+        for ``task.extra_tests['fine']`` pass that dict).
+    idx: samples of ``source`` (default: the first ``n`` of the test split / of the set).
+    targets: also report the residuals of the stored targets (round-off reference).
+Returns:
+    ``{metric: {'mean', 'max'}}`` for the predictions and ``target_<metric>`` for the stored targets.
+```
+
+</details>
+
+### `cell_tensors`
+
+```python
+cell_tensors(blob: dict, i: int, key: str, K, top_key: str, inverse: bool = False) -> Tensor
+```
+Stored per-cell material tensors of sample `i` in the complex's top-cell order: `(n_top, D, D)` float64 (`inverse`: their inverses -- full-rank planar / volume tensors only; surface tensors are rank 2).
+
+### Constants
+
+- `ANISO_TASKS`: dict with keys {'AHP_r10', 'AHP_r100', 'ASURF_r10', 'ASURF_r100', 'ASURF_heat_r10', 'ASURF_heat_r100', 'ACURL_r10', 'ACURL_r100', 'ACURLb_r10', 'ACURLb_r100', 'ADARCY_r10', 'ADARCY_r100', ...}
+- `ANISO_DEFAULTS`: dict with keys {'AHP', 'ASURF', 'ASURF_heat', 'ACURL', 'ACURLb', 'ADARCY', 'ADARCYp'}
+- `SPECS`: dict with keys {'AHP', 'ASURF', 'ASURF_heat', 'ACURL', 'ACURLb', 'ADARCY', 'ADARCYp'}
 
 
 ## Extension task suite: `rhmp.tasks.suite`
@@ -3297,6 +4603,142 @@ True if the model provides the mass-weighted divergence readout `mdiv:1` (`y = s
 - `SUITE_DEFAULTS`: dict with keys {'SURF', 'DYN', 'DYNfix', 'HP_qual'}
 
 
+## Robustness: `rhmp.robustness`
+
+Symmetry and robustness transforms of a task.
+
+<details><summary>module docstring</summary>
+
+```text
+Robustness transforms and the robustness table (exact symmetries, gauge noise, input noise, batch composition).
+
+Library API (used by ``scripts/eval_robustness.py`` and ``tests/test_train.py``)::
+
+    from rhmp.robustness import robustness_table, transformed_task, gauge_task, noise_task, random_rotation
+    rows = robustness_table(model, task, te, relabel=True, flip_orient=True, rotate=True, gauge_noise=[0.1, 1],
+                            noise=[0.01], batch_sizes=[1, 64], eval_batch=64, device="cuda")
+
+Transforms (each returns a test-only :class:`~rhmp.data.TaskData` view with the task's statistics and readout):
+
+* vertex relabelling / face-orientation flips / E(n) transforms -> :func:`transformed_task`: the complexes are rebuilt
+  from the transformed mesh and the data of every degree are remapped (odd cochains with the orientation sign of the
+  new canonical edges/faces, node vectors rotated, orientation output maps rebuilt from the new geometry);
+* gauge noise ``theta -> theta + d0 lambda`` on connection inputs -> :func:`gauge_task`;
+* Gaussian input noise on the normalised inputs -> :func:`noise_task`.
+
+An exactly equivariant/invariant model gives the same metrics on every transformed view (up to the float32 rounding
+of the rebuilt geometry, ~1e-7); ``tests/test_train.py::test_robustness_transforms_are_exact`` checks this.
+```
+
+</details>
+
+### `remap_complex`
+
+```python
+remap_complex(K, *, perm=None, flip_frac=0.0, Q=None, shift=None, seed=0)
+```
+Transformed complex and per-degree data maps.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    K: source complex (single mesh).
+    perm: ``(n0,)`` new vertex i = old vertex ``perm[i]``.
+    flip_frac: fraction of top cells whose orientation is reversed.
+    Q, shift: E(n) transform ``x -> x Q^T + shift`` of the positions.
+Returns:
+    ``(K_new, maps)``, ``maps[k] = (idx, sign)``: ``new_k = old_k[idx] * sign`` (the sign only for odd data).
+```
+
+</details>
+
+### `transformed_task`
+
+```python
+transformed_task(
+    task: TaskData,
+    idx: torch.Tensor,
+    *,
+    perm_seed=None,
+    flip_frac=0.0,
+    Q=None,
+    shift=None,
+    seed=0,
+) -> TaskData
+```
+Test-split view of `task` under a mesh transform (one transform per mesh for variable-mesh tasks).
+
+### `gauge_task`
+
+```python
+gauge_task(task: TaskData, idx: torch.Tensor, s: float, seed: int = 0) -> TaskData
+```
+Test-split view with gauge noise `theta -> theta + d0 lambda` on the connection columns (raw units), `lambda ~ N(0, s^2)` per node and sample.
+
+### `noise_task`
+
+```python
+noise_task(task: TaskData, idx: torch.Tensor, s: float, seed: int = 0) -> TaskData
+```
+Test-split view with Gaussian noise of standard deviation `s` on all normalised inputs.
+
+### `random_rotation`
+
+```python
+random_rotation(D: int, seed: int, proper: bool = True) -> np.ndarray
+```
+Random orthogonal `(D, D)` matrix with det +1 (`proper`) or -1.
+
+### `robustness_table`
+
+```python
+robustness_table(
+    model,
+    task: TaskData,
+    te: torch.Tensor,
+    *,
+    eval_batch: int,
+    device,
+    relabel: bool = False,
+    flip_orient: bool = False,
+    rotate: bool = False,
+    reflect: bool = False,
+    gauge_noise=(),
+    noise=(),
+    batch_sizes=(),
+    extra: bool = True,
+    seed: int = 0,
+    log=<built-in function print>,
+) -> list[dict]
+```
+Rows of the robustness table for `model` on the test samples `te` of `task`.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    model: trained ``RHMP`` in eval mode (``record_diagnostics = False`` recommended).
+    task: normalised task (statistics of the training run, see ``rhmp.train._renormalize``).
+    te: test sample indices.
+    eval_batch: evaluation batch size of the reference row ``base``.
+    relabel, flip_orient, rotate, reflect: exact-symmetry rows (``reflect`` is skipped for tasks with an
+        orientation output map, whose targets are pseudo-quantities, and for legacy frame-dependent inputs).
+    gauge_noise: lambda stds of the gauge rows (tasks with connection inputs, shared meshes).
+    noise: input-noise stds.
+    batch_sizes: evaluation batch sizes (batch independence, with ``max_dpred`` vs the reference).
+    extra: also evaluate the task's extra test sets (``fine``, quality splits...).
+Returns:
+    list of dicts ``{condition, R2, MSE, NRMSE, SSIM, Pearson, N, [max_dpred], [seconds], dR2}``.
+```
+
+</details>
+
+### Constants
+
+- `SYMMETRY_CONDITIONS`: ('relabel', 'flip-orient', 'rotate', 'reflect')
+
+
 ## Baselines: `rhmp.baselines`
 
 Lazy entry points.
@@ -3526,14 +4968,14 @@ CLI entry point (`python3 -m rhmp.baselines.registry`; see the module docstring)
 - `MODELS`: dict with keys {'rhmp', 'dec_fixed', 'unit_star', 'unit_fixed', 'ours_v1', 'mgn', 'mgn_fast', 'gcn', 'gat', 'schnet', 'egnn', 'gauge_cnn', ...}
 - `SPECS`: dict with keys {'rhmp', 'dec_fixed', 'unit_star', 'unit_fixed', 'ours_v1', 'mgn', 'mgn_fast', 'gcn', 'gat', 'schnet', 'egnn', 'gauge_cnn', ...}
 - `LEGACY_SCALAR_COLUMNS`: dict with keys {'T6', 'T6_100K', 'T7'}
-- `LEGACY_TASKS`: ('T1', 'T3', 'T5', 'T6', 'T7', 'T6_100K')
+- `LEGACY_TASKS`: ('T1', 'T1p', 'T1pm', 'T1pml', 'T1pf', 'T1pmf', 'T1pmlf', 'T1g', 'T1gml', 'T2v', 'T2a', 'T3', 'T5', 'T6', 'T7', 'T6_1...
 - `V1_EDGE_MODELS`: ('mpsn', 'sccnn', 'clifford_smpn')
-- `V1_EDGE_TASKS`: ('T1', 'T2', 'T3', 'T5', 'T6', 'T7')
+- `V1_EDGE_TASKS`: ('T1', 'T1p', 'T1pm', 'T1pml', 'T1pf', 'T1pmf', 'T1pmlf', 'T1g', 'T1gml', 'T2', 'T2v', 'T2a', 'T3', 'T5', 'T6', 'T7')
 
 
 ## Building blocks: layers: `rhmp.layers`
 
-Normalised metric Hodge operators, resolvent, RHMPLayer.
+Normalised metric Hodge operators, resolvent / solve / projection layers, RHMPLayer.
 
 <details><summary>module docstring</summary>
 
@@ -3564,6 +5006,7 @@ Notation (per degree ``k``, all feature tensors ``(n_k, B, C)``, per-cell/per-sa
 Layer update (all degrees synchronously from the layer input)::
 
     m_k = sum_p c^up_p L_up^p x_k + sum_p c^dn_p L_dn^p x_k + w_cu T_up x_{k+1} + w_cd T_dn x_{k-1}
+          (+ the transport term sum_p g_p T^p x_0 on the vertices when configured, ``rhmp.transport``)
     x_k <- x_k + gamma_k * sigmoid(MLP(log1p(rms(m_k)))) * m_k / rms(m_k)      (radial norm gate)
 
 Implementation notes (performance):
@@ -3600,6 +5043,9 @@ LayerContext(
     resolvent_prev: dict | None = None,
     log_gm: list | None = None,
     log_vol: Tensor | None = None,
+    beta_scale: dict | None = None,
+    energy_ref: Tensor | None = None,
+    transport_fields: Tensor | None = None,
 )
 ```
 Geometry-derived tensors shared by the lifting, all layers and the readout of one forward pass.
@@ -3623,6 +5069,9 @@ Geometry-derived tensors shared by the lifting, all layers and the readout of on
 | `resolvent_prev` | `dict \| None` | `None` | `{k: (n_k, B, C)}` last resolvent-layer solution per degree (warm starts), or `None`. |
 | `log_gm` | `list \| None` | `None` | `log` of the geometric mean of `star_k` per graph, `(1\|G,)` (restores physical units). |
 | `log_vol` | `Tensor \| None` | `None` | `log` of the total dual measure `sum star_0` per graph, `(1\|G,)` (domain scale `L^D`). |
+| `beta_scale` | `dict \| None` | `None` | `{(k, up): (1\|G, 1)}` factors `beta_unit(train) / beta_unit(mesh)` applied to the block bounds (`frozen_units`), else `None`. |
+| `energy_ref` | `Tensor \| None` | `None` |  |
+| `transport_fields` | `Tensor \| None` | `None` | input / latent transport fields of the transport term `(n_1, B, J)` or `None` (`rhmp.transport`). |
 
 <details><summary>docstring</summary>
 
@@ -3645,6 +5094,10 @@ Attributes:
     resolvent_prev: ``{k: (n_k, B, C)}`` last resolvent-layer solution per degree (warm starts), or ``None``.
     log_gm: ``log`` of the geometric mean of ``star_k`` per graph, ``(1|G,)`` (restores physical units).
     log_vol: ``log`` of the total dual measure ``sum star_0`` per graph, ``(1|G,)`` (domain scale ``L^D``).
+    beta_scale: ``{(k, up): (1|G, 1)}`` factors ``beta_unit(train) / beta_unit(mesh)`` applied to the block bounds
+        (``frozen_units``), else ``None``.
+    transport_fields: input / latent transport fields of the transport term ``(n_1, B, J)`` or ``None``
+        (``rhmp.transport``).
 ```
 
 </details>
@@ -3747,6 +5200,7 @@ make_context(
     dtype: torch.dtype,
     even: list[Tensor | None] | None = None,
     record: bool = False,
+    frozen: dict | None = None,
 ) -> LayerContext
 ```
 Build the per-forward `LayerContext` (geometry only, no gradients; operators cached per complex).
@@ -3761,6 +5215,8 @@ Args:
     dtype: feature dtype.
     even: even raw inputs per degree (``(n_k, B, E_k)`` or ``None``), length ``K.dim + 1``.
     record: record diagnostics in the layers.
+    frozen: training-mesh normalisers (``frozen_units``; :func:`unit_reference` plus a hashable ``'key'``) or
+        ``None`` (this complex's own normalisers, the default).
 
 Returns:
     The context.
@@ -3788,12 +5244,27 @@ magnitude is a learned bounded function of the message magnitude and its directi
 
 ``gate='none'`` (linear models, e.g. the solver preset): ``x + gamma * m`` (no nonlinearity, no normalisation).
 
+``gate='homog'`` (homogeneous of degree one in the field amplitude): ``x + gamma * 2 sigmoid(MLP(xi)) * m`` with
+the scale-invariant per-cell invariants ``xi = [log((|m|^2/C + eps) / (|x|^2/C + eps)), <x, m> / (C sqrt((|x|^2/C
++ eps)(|m|^2/C + eps)))]``, ``eps = HOMOG_EPS (|x|^2 + |m|^2) / C`` (relative size and alignment of the message;
+``MLP: 2 -> hidden -> SiLU -> 1``, last layer zero-initialised, so the update is ``x + gamma m`` at
+initialisation).  Scaling ``(x, m) -> (lambda x, lambda m)`` leaves the factor unchanged, so a stack of such layers
+keeps the amplitude of its input instead of bounding every update by ``gamma``; with a constant factor it is a
+linear filter.
+
 Args:
-    mode: ``'norm' | 'relu' | 'none'``.
+    mode: ``'norm' | 'relu' | 'none' | 'homog'``.
     hidden: hidden width of the gate MLP.
 ```
 
 </details>
+
+#### `RadialGate.homog_scale`
+
+```python
+homog_scale(x: Tensor, m: Tensor) -> Tensor
+```
+Per-cell factor `gamma * 2 sigmoid(MLP(xi))` `(n, B, 1)` of the homogeneous gate (scale invariant).
 
 #### `RadialGate.scale`
 
@@ -3839,6 +5310,16 @@ RHMPLayer(
     solve_bc: str = 'dirichlet',
     tensor_param: str = 'full',
     solve_precond: str = 'none',
+    term_gates: bool = False,
+    project_harmonic: bool = True,
+    kutta_range: float = 8.0,
+    project_solver: str = 'cg',
+    kutta_corner: float = 0.0,
+    transport: dict | None = None,
+    solve_picard: int = 0,
+    picard_relax: float = 0.5,
+    metric_geo: bool = True,
+    picard_init: str = 'zero',
 ) -> None
 ```
 Bases: `Module`.
@@ -3863,8 +5344,17 @@ Args:
     identity_metric: every metric ``H = 1`` (ablation of the learned metric; with ``scaling='dec'`` the DEC stars
         of the block's own degree remain through the scaling ``S``; see ``RHMPConfig.identity_metric``).
     fused: use the fused polynomial kernels (``False`` = plain autograd reference path).
-    kind: ``'poly'`` (polynomial filters) or ``'resolvent'`` (self term ``(I + tau_up L_up + tau_dn L_dn)^{-1} x``
-        by batched CG, DESIGN §9.2; learnable ``tau = exp(log_tau) <= TAU_MAX`` per degree and block, init 1).
+    kind: ``'poly'`` (polynomial filters), ``'resolvent'`` (self term ``(I + tau_up L_up + tau_dn L_dn)^{-1} x``
+        by batched CG, DESIGN §9.2; learnable ``tau = exp(log_tau) <= TAU_MAX`` per degree and block, init 1),
+        ``'solve'`` or ``'project'`` (metric Hodge projection of the edge features with the learned edge metric,
+        harmonic / Kutta correction and vertex potential; :meth:`_project_forward`; uses ``solve_iters``,
+        ``solve_tol``, ``solve_precond``).
+    project_harmonic: projection layers remove the circulation along the cohomology generators of the complex
+        (``K.meta['cohomology'][1]``) in the learned Kutta metric (default True; no effect without generators).
+    kutta_range: bound of the log Kutta weights (``W / star1`` in ``[e^-a, e^a]``).
+    project_solver: ``'cg'`` (preconditioned CG, :func:`metric_projection`) or ``'direct'`` (sparse LU per graph
+        and sample on the CPU, :func:`direct_projection`; diagonal metrics).
+    kutta_corner: initial slope of the corner prior of the Kutta weights (:class:`KuttaHead`; 0: off).
     resolvent_iters: CG iterations of resolvent layers.
     resolvent_grad: ``'implicit'`` (adjoint solve) or ``'unrolled'`` (checkpointed unrolled iterations).
     metric_type: ``'diag'`` or ``'tensor'`` (Whitney material-tensor metric for the up blocks and cross-up terms of
@@ -3878,7 +5368,8 @@ Args:
         global magnitude then matters (the ``beta``-normalised ``L_hat`` is invariant to ``H -> c H``).
     solve_iters, solve_tol, solve_bc: ``kind='solve'``: CG budget and boundary condition (``'dirichlet'``: fixed
         ``K.meta['dirichlet'][k]`` or ``K.boundary[k]`` cells; ``'none'``; ``'neumann'``: no fixed cells and
-        mean-free vertex sources, see :func:`physical_solve`).  A solve layer computes
+        mean-free vertex sources; ``'lift'``: the fixed cells of ``'dirichlet'`` keep the layer input as
+        inhomogeneous Dirichlet data, see :func:`physical_solve`).  A solve layer computes
         ``y_k = (Delta_H + lam / L^2)^{-1} x_k`` with the un-normalised metric Hodge Laplacian (physical units),
         ``lam = softplus(log_lam)`` (init 1e-3), and updates ``x_k <- gate(x_k, y_k - x_k [+ cross terms])``;
         with ``gate='none'`` (gain 1) this is ``x_k <- y_k``.
@@ -3886,6 +5377,28 @@ Args:
         (:class:`rhmp.metric.TensorMetricHead`).
     solve_precond: ``'none'`` (Jacobi) or ``'twolevel'`` (Jacobi plus a coarse correction for vertex solves;
         :func:`physical_solve`).
+    term_gates: polynomial layers with diagonal metrics only: every term of the message (each power ``L^p x``
+        and each cross term) gets its own per-cell factor from scale-invariant invariants (:class:`TermGate`),
+        ``m_k = sum_j c_j g_j t_j``; ``False`` (default) is the plain polynomial message.
+    transport: transport specification (``rhmp.transport``; poly and resolvent layers): the vertex message
+        gains ``sum_p g_p T^p x_0`` with ``T`` the dual-cell flux balance along edge transport fields and the
+        layer's edge metric ``H_1``.  ``None`` / empty: off.
+    solve_picard: ``kind='solve'``: number ``J`` of fixed-point (Picard) iterations of the vertex solve with a
+        state-dependent metric (0: one solve with the metric of the layer input, the default).  Iteration ``j``
+        predicts the metric of the vertex block (``H_1``: the diagonal edge head ``H1`` or the tensor head ``T1``)
+        from the usual descriptors plus the field-energy invariant of the previous iterate
+        (:meth:`picard_energy_feature`, ``y_0 = 0``), solves with the layer input as right-hand side and relaxes:
+        ``y_1 = S(H_1) x``, ``y_j = y_{j-1} + omega (S(H_j) x - y_{j-1})``; weight-tied, ``omega = sigmoid(.)``
+        learnable.  Other degrees of a Picard layer use one solve whose metric sees the energy invariant of the
+        layer input ``x_0``.
+    picard_relax: initial relaxation ``omega`` in (0, 1) of Picard layers.
+    metric_geo: ``False`` removes the geometric descriptors from the inputs of the metric heads (material columns
+        and feature invariants only): the learned metric is then a function of the material and of the state,
+        i.e. a constitutive law, and cannot encode mesh-specific position cues.
+    picard_init: state of the first Picard iteration: ``'zero'`` (``y_0 = 0``, the default: the first metric is
+        the zero-field law) or ``'learned'`` (a learnable uniform energy invariant ``f_0 = softplus(.) >= 0``, a
+        starting operating point, so that the zero-field law of the later iterations does not have to double as
+        the initial guess; zero-initialised to ``f_0 ~ 3e-4``).
 ```
 
 </details>
@@ -3899,6 +5412,7 @@ metrics(
     ctx: LayerContext,
     need_up: list[int] | None = None,
     need_dn: list[int] | None = None,
+    extra: dict | None = None,
 ) -> tuple[list[Tensor | None], list[Tensor | None]]
 ```
 Log-metrics of the blocks.
@@ -3912,6 +5426,8 @@ Args:
     ctx: context.
     need_up: degrees ``m`` whose up-usage metric is needed (default: ``1..K``).
     need_dn: degrees ``m`` whose down-usage metric is needed (default: ``0..K-1``).
+    extra: optional ``{m: (n_m, B)}`` invariants appended to the head features of degree ``m`` (Picard
+        layers: the field-energy invariant on edges).
 
 Returns:
     ``(logH_up, logH_dn)``: ``logH_up[m]`` ``(n_m, B)`` is used by the up block of degree ``m-1`` and
@@ -3923,9 +5439,15 @@ Returns:
 #### `RHMPLayer.tensor_metric`
 
 ```python
-tensor_metric(km: int, x: list[Tensor], q: SharedCoboundaries, ctx: LayerContext) -> TensorMetric
+tensor_metric(
+    km: int,
+    x: list[Tensor],
+    q: SharedCoboundaries,
+    ctx: LayerContext,
+    extra: tuple[Tensor, Tensor] | None = None,
+) -> TensorMetric
 ```
-The Galerkin material-tensor metric of degree `km` (`TensorMetric`).
+The Galerkin material-tensor metric of degree `km` (`TensorMetric`); `extra = (on top cells (n_top, B), on edges (n_1, B))` invariants appended to the descriptors (Picard layers: field energy).
 
 <details><summary>docstring</summary>
 
@@ -3987,6 +5509,20 @@ Returns:
 
 </details>
 
+#### `RHMPLayer.block_terms`
+
+```python
+block_terms(
+    up: bool,
+    k: int,
+    x: list[Tensor],
+    q1: Tensor | None,
+    log_H: Tensor,
+    ctx: LayerContext,
+) -> tuple[list[Tensor], list[Tensor]]
+```
+The separate terms of `block` (for per-term gates): `[L x, .., L^P x, T x_nb]` and their scalar coefficients `[c_1, .., c_P, w]` (the cross term only with `cross`); each term `(n_k, B, C)`.
+
 #### `RHMPLayer.forward`
 
 ```python
@@ -4037,6 +5573,27 @@ Returns:
 tau(key: str) -> Tensor
 ```
 Resolvent time step `tau = exp(log_tau) <= TAU_MAX` of block `key` (`'up{k}'` / `'dn{k}'`).
+
+#### `RHMPLayer.picard_energy_feature`
+
+```python
+picard_energy_feature(y: Tensor, ctx: LayerContext) -> tuple[Tensor, Tensor]
+```
+Field-energy invariant of a vertex field `y` `(n_0, B, C)` for Picard layers.
+
+<details><summary>docstring</summary>
+
+```text
+``e_f = (1/C) sum_c (d_0 y_c)_f^T G_f (d_0 y_c)_f / |f|`` per top cell (``G_f`` = the Whitney/Galerkin star block
+of the unit tensor, so ``e_f`` = the mean over channels of ``|grad y_c|^2`` of the P1 field in physical units),
+returned as ``0.5 log(1 + e / e_0)`` on the top cells and its mean over the incident top cells on the edges
+(``e_0 = exp(picard_log_e0)`` learnable).  O(C)-, E(n)-, orientation- and relabelling-invariant, per sample.
+
+Returns:
+    ``(on top cells (n_top, B), on edges (n_1, B))``.
+```
+
+</details>
 
 ### class `BlockOperands`
 
@@ -4402,7 +5959,8 @@ Operands of the up block of degree `k` with the tensor metric `H_{k+1}` (`tm`).
 
 ```text
 ``rho = max_e rowsum|H|_e >= lambda_max(H)`` (per sample), ``beta_unit >= lambda_max(A^T A)``, hence
-``||A^T H A / (rho beta_unit)|| <= 1`` and ``||A^T H / (sqrt(beta_unit) rho)|| <= 1``.
+``||A^T H A / (rho beta_unit)|| <= 1`` and ``||A^T H / (sqrt(beta_unit) rho)|| <= 1``.  With ``frozen_units``
+``beta_unit`` is the training mesh's (``ctx.beta_scale``), as for the diagonal blocks.
 ```
 
 </details>
@@ -4433,6 +5991,22 @@ Gershgorin bound of `A^T A` for the (scaled) up-block operator of degree `k` (te
 ```text
 Returns:
     ``(1, 1)`` for a single complex or ``(num_graphs, 1)`` for a block-diagonal batch.
+```
+
+</details>
+
+### `unit_reference`
+
+```python
+unit_reference(K: Any, scaling: str, dtype: torch.dtype) -> dict
+```
+The per-mesh geometric normalisers of one complex in its own units (what `RHMPConfig.frozen_units` stores): `log_gm` `(K+1,)` log geometric means of the reference stars, `geo_log_median` per degree `(G_k,)` (the medians behind the relative descriptors, 0 for scale-free columns), `geo_min` / `geo_max` per degree `(G_k,)` (range of every descriptor column over the complex) and `beta_unit` `{(k, up): ()}`, the unit-metric Gershgorin bounds of the scaled block operators.
+
+<details><summary>docstring</summary>
+
+```text
+Raises:
+    ValueError: for a block-diagonal batch of several meshes or a complex without ``meta['geo_log_median']``.
 ```
 
 </details>
@@ -4509,6 +6083,7 @@ physical_solve(
     x0: Tensor | None = None,
     precond: str = 'none',
     mean_free: bool = False,
+    lift: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, int]
 ```
 `y = (Delta_H + shift)^{-1} x` on the free cells (`x = 0` imposed on fixed cells) by batched (P)CG with implicit gradients (`pcg_solve_implicit`, per-sample / per-graph inner products).
@@ -4533,6 +6108,9 @@ Args:
         ``M x`` is made compatible by removing its mean per graph, sample and channel (the ``eps -> 0`` limit of
         ``(K + eps I) y = M x``, as in the T5 generator), so the solution is the zero-mean (``1^T M y = 0``)
         solution of the pure Neumann problem instead of carrying a ``1/shift``-sized constant.
+    lift: inhomogeneous Dirichlet data (``solve_bc='lift'``): the input on the fixed cells is the boundary value
+        ``g`` (``y = x`` there) and on the free cells the source, ``y_free = (K + shift M)_ff^{-1} (M x - (K + shift
+        M) g)_f``; the lift ``g`` enters through the right-hand side, so the implicit gradients stay exact.
 
 Returns:
     ``(y, y_sym, rel_res, n_iter)``: solution ``(n_k, B, C)``, its symmetric-frame form (for warm starts), the final
@@ -4552,7 +6130,8 @@ Mask of the free k-cells `(n_k, 1, 1)` (1 free, 0 fixed) or `None` (`bc='none'` 
 
 ```text
 Fixed cells: ``K.meta['dirichlet'][k]`` (bool ``(n_k,)``, list or dict per degree) when the task provides it,
-else the boundary cells ``K.boundary[k]``.
+else the boundary cells ``K.boundary[k]``.  ``bc='lift'`` has the same fixed cells (their values are the layer
+input, see :func:`physical_solve`).
 ```
 
 </details>
@@ -4705,9 +6284,453 @@ Returns:
 
 </details>
 
+### class `TermGate`
+
+```python
+TermGate(n_terms: int, hidden: int = 16) -> None
+```
+Bases: `Module`.
+
+Per-term gates of a polynomial layer (O(C)-equivariant, homogeneous of degree zero in the field amplitude).
+
+<details><summary>docstring</summary>
+
+```text
+The message of degree ``k`` is ``m = sum_j c_j g_j t_j`` over its terms ``t_j`` (the powers ``L_up^p x``,
+``L_dn^p x`` and the cross terms ``T_up x_{k+1}``, ``T_dn x_{k-1}``) with per-cell factors
+``g = 2 sigmoid(MLP(xi))`` from the scale-invariant invariants of the term vectors relative to the layer input,
+``xi_j = [log((|t_j|^2/C + eps_j) / (|x|^2/C + eps_j)), <x, t_j> / (C sqrt((|x|^2/C + eps_j)(|t_j|^2/C +
+eps_j)))]`` with ``eps_j = HOMOG_EPS (|x|^2 + |t_j|^2) / C`` (``MLP: 2 J -> hidden -> SiLU -> J``, last layer
+zero-initialised: ``g = 1``, the plain polynomial layer, at initialisation).  The factors are O(C)-invariant and
+even, so the message stays an O(C)-equivariant odd cochain; the filter becomes cell- and configuration-dependent.
+
+Args:
+    n_terms: ``J``.
+    hidden: hidden width of the MLP.
+```
+
+</details>
+
+#### `TermGate.forward`
+
+```python
+forward(x: Tensor, terms: list[Tensor]) -> Tensor
+```
+Factors `(n, B, J)` for the terms `[(n, B, C)] * J` of the input `x` `(n, B, C)`.
+
+### `metric_projection`
+
+```python
+metric_projection(
+    ctx: LayerContext,
+    x1: Tensor,
+    up: tuple,
+    free: Tensor | None,
+    iters: int,
+    tol: float,
+    precond: str = 'none',
+) -> tuple[Tensor, Tensor, Tensor, int]
+```
+Potential of the metric (Hodge / Leray) projection of edge cochains.
+
+<details><summary>docstring</summary>
+
+```text
+``alpha = argmin_a ||x1 - d0 a||_H^2`` over the vertex potentials that vanish on the fixed vertices:
+``(d0^T H d0) alpha = d0^T H x1`` on the free vertices, with the natural condition on the free part of the
+boundary.  ``x1 - d0 alpha`` is the ``H``-orthogonal projection of ``x1`` onto the cochains that are co-closed on the
+free vertices, ``d0^T H (x1 - d0 alpha) = 0`` there; for the 1-form of a uniform flow and ``H`` the reference star it
+is the potential flow around the free boundary (no flux through it).  The result does not depend on the scale of
+``H``.  Linear in ``x1`` and identical for every channel (O(C)-equivariant), per sample and per graph.  Jacobi (or
+two-level) preconditioned CG with implicit gradients (:func:`pcg_solve_implicit`).
+
+Args:
+    ctx: context; x1: ``(n1, B, C)`` cochain values.
+    up: the metric of the degree-0 up block, ``('diag', geometry, H (n1, B, 1))`` or ``('tensor', geometry,
+        TensorMetric)`` with ``geometry = ctx.blocks[(0, True)]`` (as :class:`PhysicalHodge`).
+    free: free-vertex mask ``(n0, 1, 1)`` or ``None`` (no fixed vertices: the zero-mean potential of every graph).
+    iters, tol, precond: CG budget and preconditioner (``'none'``: Jacobi, ``'twolevel'``).
+
+Returns:
+    ``(alpha, d0 alpha, rel_res, n_iter)``: ``(n0, B, C)``, ``(n1, B, C)``, the final relative CG residual ``(S, B)``
+    and the number of iterations run.
+```
+
+</details>
+
+### class `KuttaHead`
+
+```python
+KuttaHead(
+    geo0: int,
+    geo1: int,
+    even1: int = 0,
+    hidden: int = 32,
+    log_range: float = 8.0,
+    corner: float = 0.0,
+) -> None
+```
+Bases: `Module`.
+
+Bounded log-weights `kappa = a tanh(MLP(.))` of the Kutta metric `W = star1 exp(kappa)` of a projection layer.
+
+<details><summary>docstring</summary>
+
+```text
+Edge features: the descriptors ``geo_1``, the mean and the absolute difference over the two end vertices of the
+vertex descriptors ``geo_0`` (a corner of the boundary shows up in the angle defect of its vertex), the even edge
+inputs, and the log energy density of the projected harmonic cochains relative to its mean over the graph.  All of
+them are invariant under E(n), O(C), relabelling and orientation changes.  ``MLP: P -> hidden -> SiLU -> 1`` with a
+zero-initialised last layer (``W = star1`` at initialisation).
+
+``corner = s > 0`` (optional prior, default off): ``kappa = a tanh(MLP(.) + s c_e)`` with a learnable slope ``s`` and
+the corner indicator ``c_e in [0, 1]`` of the boundary edges at a re-entrant corner of the domain (:func:`corner
+indicator <boundary_corner>`), where the potential flow is singular: the weights start concentrated at sharp
+trailing edges instead of learning that from the data.
+
+Args:
+    geo0, geo1: descriptor widths of vertices and edges; even1: even edge input columns; hidden; log_range: ``a``.
+    corner: initial slope of the corner prior (0: no prior).
+```
+
+</details>
+
+#### `KuttaHead.forward`
+
+```python
+forward(geo: Tensor, feats: Tensor, corner: Tensor | None = None) -> Tensor
+```
+`geo (n1, geo1 + 2 geo0)`, `feats (n1, B, 1 + even1)`, `corner (n1,)` -> `kappa (n1, B)` in `[-a, a]`.
+
+### `reference_energy`
+
+```python
+reference_energy(ctx: LayerContext) -> Tensor
+```
+Per-graph reference energy density of edge cochains `(1|G, 1|B)`: the value set by the model (`ctx.energy_ref`: the Galerkin energy density of the amplitude 1-form, `RHMPConfig.amplitude_energy`), else the energy density of a cochain of unit values under the diagonal reference star, `sum_e star1_e / sum_i star0_i`. A cochain of typical value 1 belongs to a field of magnitude `sqrt(E_ref)` (in inverse length units).
+
+### `direct_projection`
+
+```python
+direct_projection(
+    ctx: LayerContext,
+    x1: Tensor,
+    H: Tensor,
+    free: Tensor | None,
+) -> tuple[Tensor, Tensor]
+```
+The potential of `metric_projection` for a diagonal metric by sparse direct solves (one factorisation per graph and sample on the CPU, float64; exact to round-off, no iteration count, gradients by the adjoint method).
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    ctx: context; x1: ``(n1, B, C)``; H: ``(n1, B)`` positive; free: free-vertex mask ``(n0, 1, 1)`` or ``None``.
+Returns:
+    ``(alpha (n0, B, C), d0 alpha (n1, B, C))``; without fixed vertices the zero-mean potential of every graph.
+```
+
+</details>
+
+### `dense_projection`
+
+```python
+dense_projection(
+    ctx: LayerContext,
+    x1: Tensor,
+    up: tuple,
+    free: Tensor | None,
+) -> tuple[Tensor, Tensor]
+```
+The potential of `metric_projection` by batched dense Cholesky factorisations on the device in float64 (one factorisation per sample, exact to round-off, diagonal and tensor metrics; gradients by autograd through the factorisation).  The operator `s d0^T H d0 s` of the sample is materialised by applying it to the identity, so the solver is meant for complexes with one graph per batch and up to a few thousand vertices (the fixed meshes of the paper tasks); block-diagonal batches of meshes use `'direct'` or `'cg'`.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    ctx: context; x1: ``(n1, B, C)``; up: ``('diag', geometry, H (n1, B, 1))`` or ``('tensor', geometry,
+        TensorMetric)``; free: free-vertex mask ``(n0, 1, 1)`` or ``None``.
+Returns:
+    ``(alpha (n0, B, C), d0 alpha (n1, B, C))``; without fixed vertices the zero-mean potential.
+```
+
+</details>
+
+### `direct_projection`
+
+```python
+direct_projection(
+    ctx: LayerContext,
+    x1: Tensor,
+    H: Tensor,
+    free: Tensor | None,
+) -> tuple[Tensor, Tensor]
+```
+The potential of `metric_projection` for a diagonal metric by sparse direct solves (one factorisation per graph and sample on the CPU, float64; exact to round-off, no iteration count, gradients by the adjoint method).
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    ctx: context; x1: ``(n1, B, C)``; H: ``(n1, B)`` positive; free: free-vertex mask ``(n0, 1, 1)`` or ``None``.
+Returns:
+    ``(alpha (n0, B, C), d0 alpha (n1, B, C))``; without fixed vertices the zero-mean potential of every graph.
+```
+
+</details>
+
+### `boundary_corner`
+
+```python
+boundary_corner(ctx: LayerContext) -> Tensor
+```
+Corner indicator of the edges, `(n1,)` in `[0, 1]`: for a boundary edge the larger of `clamp((-defect - pi/2) / (pi/2), 0, 1)` over its two end vertices (`defect = pi - interior angle sum` of a boundary vertex, the vertex descriptor `angle_defect`); 0 for interior edges and on smooth or convex parts of the boundary, close to 1 at a sharp re-entrant corner (interior angle towards 2 pi, e.g. a trailing edge seen from the fluid).  Intrinsic: E(n)-, relabelling- and orientation-invariant.
+
 ### Constants
 
 - `TAU_MAX`: 100.0
+
+
+## Building blocks: transport term: `rhmp.transport`
+
+Advective transport fluxes of the vertex features.
+
+<details><summary>module docstring</summary>
+
+```text
+Transport term: discrete Lie derivative of the vertex features along edge transport fields (``RHMPConfig.transport``).
+
+Scalar transport ``d_t u + div(u v) = 0`` is generated by an operator that is not symmetric, so the symmetric positive
+semi-definite Hodge blocks of the layer cannot represent it; without this term a model can only get a direction from
+learned latent fields through the cross terms.  The transport term adds, on the vertices, the dual-cell flux balance
+of the features along one or more *transport fields*.
+
+A transport field ``phi`` is an odd (orientation-reversing), channel-invariant edge scalar: a velocity one-form given
+as an input column of degree 1 (``'inputs'``), a latent edge column (``'latent'``), or an O(C)-invariant odd
+contraction of the hidden state (``'hidden'``).  With the metric ``H_1`` of the layer (the one the up block of degree
+0 uses) it defines the flux through the dual edges and three operators on the vertex features (symmetrised DEC frame
+``x = star_0^{1/2} u``, ``s = star_0^{-1/2}`` the scaling of the degree-0 up block)::
+
+    F      = (H_1 phi) / beta_up0                              flux through the dual edges (normalised metric)
+    C(F) x = s ⊙ d_0^T ( F ⊙ |d_0| (s ⊙ x) ) / 2                conservative, centred: dual-cell flux balance
+    A(F) x = s ⊙ |d_0|^T ( F ⊙ d_0 (s ⊙ x) ) / 2                advective, centred (A = C^T)
+    U(F) x = s ⊙ d_0^T ( |F| ⊙ d_0 (s ⊙ x) ) / 2                upwind correction (graph Laplacian, weights |F| / 2)
+
+The conservative upwind flux is ``C - U`` and the advective upwind form ``A + U``.  With the reference metric
+``H_1 = star_1`` (cotan weights) ``star_1 phi`` is the DEC flux of ``v`` through the dual edges, ``C`` is the
+finite-volume discretisation of ``-div(u v)`` on the dual cells and ``A`` that of ``v . grad u`` (both times the dual
+area, mapped to the symmetric frame).  The message of degree 0 gains
+
+    T   = sum_j ( a_j C(F_j) + b_j A(F_j) + c_j U(F_j) )           scalar coefficients per layer and field (init 0)
+    m_0 += sum_{p=1..P} g_p T^p x_0,      g_1 = 1,  g_{p>1} learned (init 0)
+
+Properties (tests in ``tests/test_transport.py``):
+
+* the operator is linear in the hidden state and acts identically on every channel: O(C)-equivariant;
+* ``phi`` odd and ``d_0`` odd: ``C``, ``A``, ``U`` are invariant under edge-orientation changes and vertex relabelling;
+  only metrics, stars and incidence enter (E(n)-invariant);
+* ``C`` and ``U`` conserve ``sum_i star_i^{1/2} x_i = sum_i star_i u_i`` exactly (``1^T d_0^T = 0``); ``A`` does not
+  (it differs from ``-C`` by the divergence of the flux, ``C + A = diag(d_0^T F)`` in the physical frame);
+* for a divergence-free flux (``d_0^T F = 0``) ``C`` is skew-symmetric (energy conserving);
+* ``metric='star'`` replaces the learned ``H_1`` by the reference star ``star_1`` (the geometric DEC flux; for models
+  whose learned metric carries a material such as an anisotropic diffusion tensor, which must not weight advection);
+* norm bounds: ``||C(F)||, ||A(F)||, ||U(F)|| <= max_e |phi_e| / 2`` per sample (``norm='metric'``: the metric is
+  normalised by the Gershgorin bound of the degree-0 up block, the field keeps its magnitude, which is the transport
+  speed); ``norm='sample'`` divides every field operator by its own per-sample Gershgorin bound (``<= 1``, and
+  invariant to the magnitude of the field).  Hidden-state fields pass through ``tanh`` (bounded, odd).
+
+Other degrees: hidden cochains of degree ``k >= 1`` are orientation-odd, so an unsigned interpolation ``|d_k| x_k`` is
+not a cochain and the construction above is specific to the (even) vertex features.  The transport of k-forms
+(``L_v = d i_v + i_v d``) needs a discrete interior product with the flux (twisted) form of ``v``, which an edge
+circulation does not determine; it is not implemented.
+```
+
+</details>
+
+### `normalize_transport`
+
+```python
+normalize_transport(spec: Any) -> dict
+```
+Validated transport specification with defaults, or `{}` (transport off).
+
+<details><summary>docstring</summary>
+
+```text
+Keys: ``inputs`` (list of odd column indices of ``inputs[1]``, default ``[]``), ``latent`` (number of latent edge
+columns used as fields, the first ones of ``latent_dims[1]``, default 0), ``hidden`` (0, 1 or 2 hidden-state
+fields, default 0), ``forms`` (subset of ``('cons', 'adv', 'upwind')``, default all), ``order`` (``P >= 1``,
+default 1), ``norm`` (``'metric'`` (default) or ``'sample'``), ``metric`` (``'layer'`` (default): the layer's
+learned edge metric ``H_1``; ``'star'``: the reference star ``star_1``, i.e. the geometric DEC flux, for models
+whose learned metric carries a material such as an anisotropic diffusion tensor).
+
+Raises:
+    ValueError: on unknown keys or invalid values, or if no field is selected.
+```
+
+</details>
+
+### class `TransportTerm`
+
+```python
+TransportTerm(spec: dict) -> None
+```
+Bases: `Module`.
+
+Transport term of one layer (see the module docstring).
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    spec: transport specification (:func:`normalize_transport`; non-empty).  The input and latent fields are read
+        from ``ctx.transport_fields`` (``(n_1, B, len(inputs) + latent)``, set by the model from the columns
+        :func:`transport_columns`), the hidden fields are computed from the layer input.
+```
+
+</details>
+
+#### `TransportTerm.extra_repr`
+
+```python
+extra_repr() -> str
+```
+Return the extra representation of the module.
+
+<details><summary>docstring</summary>
+
+```text
+To print customized extra information, you should re-implement
+this method in your own modules. Both single-line and multi-line
+strings are acceptable.
+```
+
+</details>
+
+#### `TransportTerm.fields`
+
+```python
+fields(x: list[Tensor], ctx: Any) -> Tensor
+```
+Transport fields `phi` `(n_1, B, J)`: input / latent columns (`ctx.transport_fields`), then the hidden fields `tanh(<x_1, (|d_0| x_0) / 2> / C)` and `tanh(d_0 (|x_0|^2 / (2 C)))`.
+
+#### `TransportTerm.fluxes`
+
+```python
+fluxes(phi: Tensor, ctx: Any, logH1: Tensor | None, tm: Any = None) -> Tensor
+```
+`F = (H_1 phi) / beta_up0` `(n_1, B, J)`; `norm='sample'` further divides every field by the per-sample Gershgorin bound of its operators.
+
+#### `TransportTerm.forward`
+
+```python
+forward(
+    x: list[Tensor],
+    ctx: Any,
+    logH1: Tensor | None,
+    tm: Any = None,
+    q: Tensor | None = None,
+    diag: dict | None = None,
+) -> Tensor
+```
+Transport message of the vertices `sum_p g_p T^p x_0` `(n_0, B, C)`.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    x: layer input features.
+    ctx: forward context (``scaling`` ``'dec'`` or ``'none'``).
+    logH1: ``log H_1`` of the degree-0 up block ``(n_1, B)`` (diagonal metric), or ``None`` with ``tm``.
+    tm: Whitney tensor metric of degree 1 (``rhmp.layers.TensorMetric``), or ``None``.
+    q: optional shared first coboundary ``(d_0 diag(s)) x_0``.
+    diag: optional dict receiving scalar diagnostics (``transport_absF_max``, ``transport_<form>_absmax``).
+```
+
+</details>
+
+### `transport_columns`
+
+```python
+transport_columns(cfg: Any) -> list[int]
+```
+Columns of the effective `inputs[1]` (latent columns inserted, layout `[connection | odd | latent | even]`) that are transport fields: the requested odd input columns, then the first `transport['latent']` latent columns.
+
+<details><summary>docstring</summary>
+
+```text
+Raises:
+    ValueError: if a requested column is not an ordinary odd column (connection and even columns cannot carry a
+        transport field: a connection would break the gauge invariance, an even column the orientation parity).
+```
+
+</details>
+
+### `transport_weights`
+
+```python
+transport_weights(F: Tensor, coef: dict[str, Tensor]) -> dict[str, Tensor]
+```
+Edge weights of `T = sum_j a_j C(F_j) + b_j A(F_j) + c_j U(F_j)`: `{'cons': (n1, B, 1), ...}`.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    F: fluxes ``(n_1, B, J)``.
+    coef: ``{form: (J,)}`` coefficients (``a`` for ``'cons'``, ``b`` for ``'adv'``, ``c`` for ``'upwind'``).
+```
+
+</details>
+
+### `apply_transport`
+
+```python
+apply_transport(g: Any, w: dict[str, Tensor], x: Tensor, q: Tensor | None = None) -> Tensor
+```
+`T x` for the edge weights `w` (`transport_weights`): `(n_0, B, C) -> (n_0, B, C)`.
+
+<details><summary>docstring</summary>
+
+```text
+``C x = AT (w_C ⊙ A_abs x)``, ``U x = AT (w_U ⊙ A x)``, ``A x = AT_abs (w_A ⊙ A x)`` with the scaled operators of
+the degree-0 up block (``A = d_0 diag(s)``, ``AT = diag(s) d_0^T``, absolute values likewise).
+
+Args:
+    g: ``BlockGeometry`` of the degree-0 up block.
+    w: edge weights (missing forms are skipped).
+    x: vertex features.
+    q: optional precomputed ``A x`` (shared first coboundary of the layer).
+```
+
+</details>
+
+### `transport_bound`
+
+```python
+transport_bound(g: Any, absF: Tensor) -> Tensor
+```
+Per-cell Gershgorin row bounds of `C(F)`, `A(F)` and `U(F)`: `s_i [ |d_0|^T (|F| ⊙ |d_0| s) ]_i / 2`.
+
+<details><summary>docstring</summary>
+
+```text
+Args:
+    g: the ``BlockGeometry`` of the degree-0 up block (scaling folded into ``A_abs``, ``AT_abs``; ``g.r = |d_0| s``).
+    absF: ``|F|`` ``(n_1, B, J)``.
+
+Returns:
+    ``(n_0, B, J)``; the row sums and the column sums of ``|C|``, ``|A|``, ``|U|`` are bounded by these values.
+```
+
+</details>
+
+### Constants
+
+- `TRANSPORT_FORMS`: ('cons', 'adv', 'upwind')
+- `TRANSPORT_NORMS`: ('metric', 'sample')
+- `TRANSPORT_METRICS`: ('layer', 'star')
+- `TRANSPORT_HIDDEN_MAX`: 2
 
 
 ## Building blocks: metric heads: `rhmp.metric`
@@ -4909,6 +6932,12 @@ Hidden cochains (all ``(n_k, B, C)``)::
                    mean over boundary (k-1)-cells of log1p(|x_{k-1}|^2 / C)])         (even, C-dim)
         x_k = o_k ⊙ (1 + e_k)                                                        (odd x even = odd)
 
+With ``cfg.lift_context = p > 0`` the gates ``e_k`` (k >= 1) also see the vertex mean over the cell of a linear
+projection ``P x_0`` (``C -> p``, even), i.e. the vertex quantities of the cell (densities, pressures) modulate the
+lifted odd features channel by channel.  With ``cfg.lift_vertex`` the vertex MLP also sees even vertex invariants of
+the edge inputs: the DEC codifferential (divergence) of the odd edge columns and the vertex means of their squares
+and of the even edge columns.
+
 *Material* columns (``cfg.material_dims[k]``: the last even columns) never enter the lifting: they only feed the
 metric heads (and ``metric_reference``).  ``cfg.lifting='linear'`` drops the geometry, the biases and the even gates
 (``x_0 = W f_0``, ``x_k = o_k``), so the lifting is linear in the field inputs.
@@ -5025,6 +7054,13 @@ Returns:
 
 </details>
 
+### `vertex_mean`
+
+```python
+vertex_mean(K: Any, k: int, x0: Tensor) -> Tensor
+```
+Mean over the vertices of every k-cell: `(n_0, B, H) -> (n_k, B, H)` (`-1` padded slots skipped).
+
 
 ## Building blocks: readouts: `rhmp.readout`
 
@@ -5038,9 +7074,14 @@ Readouts from hidden cochains (DESIGN §3.5).
 All readouts are E(n)-invariant (``node_vector``: E(n)-equivariant) and permutation-equivariant; they pick a
 frame of the hidden channels, so O(C) is a property of the message-passing stack only.  Orientation behaviour:
 
-* ``node_scalar``   ``MLP(x_0)`` -> ``(n_0, B, out_dim)`` (vertex scalars, even).
+* ``node_scalar``   ``MLP(x_0)`` -> ``(n_0, B, out_dim)`` (vertex scalars, even); ``cfg.readout_energy = h``: the MLP
+  also sees, and the output adds a linear map of, ``h`` Galerkin energy densities ``<x_1 A_j, x_1 B_j>`` of projections
+  of the edge features at the vertices (symmetric quadratic forms of the edge cochains in the reference metric, even;
+  e.g. the Bernoulli pressure ``-|u|^2 / 2`` of a velocity 1-form).
 * ``cochain:k``     bias-free linear map of the odd features ``x_k`` -> ``(n_k, B, out_dim)`` (odd for k >= 1:
-  fluxes, circulations, curvatures).
+  fluxes, circulations, curvatures); ``cfg.cochain_head='gated'``: odd gated head (linear x even gate);
+  ``'context'``: gated head that also sees ``d_{k-1} x_{k-1}`` (odd) and the vertex mean of ``x_0`` (even gate input);
+  ``cfg.readout_wedge`` (k = 2): plus face wedge products of the edge features (true 2-cochains, quadratic).
 * ``even:k``        ``MLP([log1p(x_k^2), log1p(|x_k|^2/C), geo_k])`` (``x_0`` itself for k = 0) -> ``(n_k, B, out_dim)``
   (orientation-invariant cell scalars, e.g. magnitudes).
 * ``grad``          ``E = d_0 phi`` with ``phi = MLP(x_0)`` (``readout_head='linear'``: ``phi = Lin_nobias(x_0)``): odd
@@ -5084,11 +7125,41 @@ frame of the hidden channels, so O(C) is a property of the message-passing stack
 ### class `NodeScalarReadout`
 
 ```python
-NodeScalarReadout(C: int, out_dim: int) -> None
+NodeScalarReadout(C: int, out_dim: int, energy: int = 0, energy_clip: float = 0.0) -> None
 ```
 Bases: `Module`.
 
 `MLP(x_0)`: `Linear(C, C) -> SiLU -> Linear(C, out_dim)`, output `(n_0, B, out_dim)`.
+
+<details><summary>docstring</summary>
+
+```text
+``energy = h > 0`` (energy readout, simplicial complexes): with ``a = x_1 A``, ``b = x_1 B`` (``A, B: C -> h``,
+bias-free) and the Galerkin energy densities at the vertices
+
+    q_i = sum_{f ∋ i} a_f^T M_f b_f / (E_ref sum_{f ∋ i} |f|)        (h channels; ``rhmp.dec.vertex_energy``)
+
+(``M_f``: Whitney mass block of the top cell ``f``, i.e. the reference metric ``H_1``; ``E_ref``: the reference
+energy density of the graph, :func:`rhmp.layers.reference_energy`), the output is
+
+    y = W_2 SiLU(W_1 x_0 + b_1 + V q) + b_2 + w q
+
+with ``V`` and ``w`` zero-initialised (the plain readout at initialisation).  ``energy_clip = c > 0`` replaces
+``q`` by ``c tanh(q / c)`` (a bound for meshes whose edge lengths vary over orders of magnitude, where hidden edge
+features that do not scale with the edge length have huge energy densities).  ``q`` is the pointwise product ``u . v``
+for cochains of constant fields in units of the reference energy, so ``w q`` contains the Bernoulli form
+``c - |u|^2`` of a velocity 1-form; it is even (a product of two odd quantities), E(n)- and relabelling-invariant and
+resolution consistent.  The stack is unchanged (O(C)-equivariant); the readout fixes the channel frame.
+```
+
+</details>
+
+#### `NodeScalarReadout.energies`
+
+```python
+energies(x: list[Tensor], ctx: LayerContext) -> Tensor
+```
+The energy channels `q` `(n_0, B, h)` (float32 / float64, autocast disabled).
 
 #### `NodeScalarReadout.forward`
 
@@ -5100,11 +7171,60 @@ forward(x: list[Tensor], ctx: LayerContext) -> Tensor
 ### class `CochainReadout`
 
 ```python
-CochainReadout(C: int, out_dim: int, k: int) -> None
+CochainReadout(
+    C: int,
+    out_dim: int,
+    k: int,
+    head: str = 'linear',
+    hidden: int = 16,
+    geo_dim: int = 0,
+    even_dim: int = 0,
+    n_hist: int = 1,
+    depth: int = 1,
+    skip: tuple | None = None,
+    spatial: bool = False,
+    wedge: int = 0,
+) -> None
 ```
 Bases: `Module`.
 
 Bias-free linear map of `x_k` (odd for k >= 1): `(n_k, B, C) -> (n_k, B, out_dim)`.
+
+<details><summary>docstring</summary>
+
+```text
+``head='gated'``: odd gated head ``y = W_2 (u ⊙ (1 + e))`` with ``u = W_1 x_k`` (``C -> hidden``, bias-free, odd)
+and the even gate ``e = MLP([log1p(u^2), log1p(|x_k|^2/C), even_k], geo_k)`` (``hidden`` wide, last layer
+zero-initialised: the linear head ``W_2 W_1 x_k`` at initialisation); ``even_k`` are the even input columns of
+degree k that the lifting sees (material columns excluded).  Odd times even, so the output keeps the orientation
+parity of a cochain; the head adds a local nonlinearity across the hidden channels.
+
+``n_hist > 1`` (``readout_layers='all'``): the odd part also reads the features of degree k after the lifting and
+after every earlier layer (``ctx.history``), ``u = W_1 x_k + sum_l W_l x_k^(l)``, so that every output channel has
+its own combination of the filters of the stack.
+
+``head='context'`` (k >= 1): the gated head with the features of the lower degrees of the cell:
+``u = W_1 x_k + W_c d_{k-1} x_{k-1}`` (odd) and the vertex mean ``v = mean_{i in cell} (W_0 x_0 + b_0)`` (even)
+as additional gate input, ``e = MLP([log1p(u^2), v, log1p(|x_k|^2/C), even_k], geo_k)``, so the output can combine
+the k-cochain with vertex quantities (densities, divergences) of the same cell; still odd times even.
+
+``depth > 1`` (gated / context heads): further odd gated stages ``u' = z + M z`` (``M`` bias-free, zero-initialised),
+``z' = u' ⊙ (1 + e'([log1p(u'^2), v, ...]))`` before ``y = W_2 z``; the head is linear at initialisation.  With
+``spatial=True`` every further stage also mixes the neighbouring cells, ``u' = z + M z + N (A z)`` with the
+combinatorial Hodge Laplacian ``A = d_{k-1} d_{k-1}^T + d_k^T d_k`` of degree k (odd to odd; ``N`` zero-initialised).
+
+``skip = (o_k, o_km1)`` (gated / context heads): ``u`` also gets ``S_k f_k^odd + S_{k-1} d_{k-1} f_{k-1}^odd``, bias-free
+linear maps of the odd input columns of degree k and of the coboundary of those of degree k-1 (``ctx.inputs``;
+``o_k``, ``o_km1`` = ``(lo, hi)`` column ranges or ``None``): a linear path from the inputs to the output.
+
+``wedge = h > 0`` (gated / context heads, k = 2): ``u`` also gets ``W (x_1 A ^ x_1 B)``, the face wedge products
+(:func:`face_wedge`) of ``h`` pairs of projections of the final edge features (``A``, ``B``: ``C -> h``, bias-free;
+``W`` zero-initialised, so the head is unchanged at initialisation).  A true 2-cochain, quadratic in the edge
+features: e.g. the advection ``theta ^ delta(d theta)`` of the vorticity 2-form ``d theta`` by the velocity
+1-form ``theta``, which an odd head cannot form.
+```
+
+</details>
 
 #### `CochainReadout.forward`
 
@@ -5334,19 +7454,55 @@ Returns:
 
 </details>
 
+- `rhmp.readout.vertex_mean`: re-export of `rhmp.lifting.vertex_mean` (documented there).
+### `face_wedge`
+
+```python
+face_wedge(K: Any, a: Tensor, b: Tensor) -> Tensor
+```
+Wedge (cup) product of primal 1-cochains on the faces: `(n_1, ..., H) x (n_1, ..., H) -> (n_2, ..., H)`.
+
+<details><summary>docstring</summary>
+
+```text
+``(a ^ b)_f = c_m sum_j (a_j b_{j+1} - a_{j+1} b_j)`` over the boundary edges of the m-gon ``f`` in cyclic order
+(``K.meta['face_edges']``), with ``a_j = s_j a(e_j)`` read along the face orientation (``s_j`` =
+``K.meta['face_edge_signs']``) and ``c_m = 1 / (8 sin^2(pi / m))`` (1/6 for triangles, 1/4 for quadrilaterals).
+For triangles and convex quadrilaterals this is the integral over the face of the wedge of the Whitney
+interpolants of two constant 1-forms, i.e. exact for constant forms.  Metric-free and antisymmetric; a true
+2-cochain (sign flip with the face orientation, invariant under edge orientation flips and under relabelling).
+```
+
+</details>
+
 
 ## Registries (generated from the code)
 
 ### Tasks: `rhmp.tasks.load_task(name, root, ...)`
 
-Datasets are not part of the package: paper tasks read `datasets/*.pkl` (v1 pickles), the other tasks read `datasets/v2/*.pt` produced by the generators in `datasets/generators/` (see `docs/DATASETS.md`, `docs/TASK_SUITE.md`).  HP/TET names accept the suffixes `_k<kappa>` and `_aniso[<R>]` (module docstring of `rhmp.tasks`).  Every name below is accepted by `load_task` and by `python -m rhmp.train --task NAME`.
+Datasets are not part of the package: paper tasks read `datasets/*.pkl` (the original pickles), the other tasks read `datasets/v2/*.pt` produced by the generators in `datasets/generators/` (see `docs/DATASETS.md`, `docs/TASK_SUITE.md`).  HP/TET names accept the suffixes `_k<kappa>` and `_aniso[<R>]` (module docstring of `rhmp.tasks`).  Every name below is accepted by `load_task` and by `python -m rhmp.train --task NAME`.
 
 | task | source | default C | default layers | default batch |
 |---|---|---:|---:|---:|
 | `T1` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
 | `T1q` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1qe` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1qn` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1p` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1pm` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1pml` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1pf` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1pmf` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1pmlf` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1g` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1gml` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1gml_mean` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
+| `T1gmla` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
 | `T2` | paper (`rhmp.tasks.paper`) | 64 | 4 | 64 |
+| `T2v` | paper (`rhmp.tasks.paper`) | 64 | 4 | 64 |
+| `T2a` | torus (`rhmp.tasks.torus`) | 64 | 4 | 64 |
 | `T3` | paper (`rhmp.tasks.paper`) | 64 | 4 | 64 |
+| `T3g` | paper (`rhmp.tasks.paper`) | 64 | 4 | 64 |
 | `T5` | paper (`rhmp.tasks.paper`) | 160 | 4 | 64 |
 | `T5g` | paper (`rhmp.tasks.paper`) | 160 | 4 | 64 |
 | `T6` | paper (`rhmp.tasks.paper`) | 128 | 4 | 64 |
@@ -5410,6 +7566,47 @@ Datasets are not part of the package: paper tasks read `datasets/*.pkl` (v1 pick
 | `SURF_heat_geo` | extension suite (`rhmp.tasks.suite`) | 128 | 4 | 8 |
 | `SURF_heat_topo` | extension suite (`rhmp.tasks.suite`) | 128 | 4 | 8 |
 | `SURF_topo` | extension suite (`rhmp.tasks.suite`) | 128 | 4 | 8 |
+| `T8_n500` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8_n2000` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8_n8000` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8fr_n500` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8fr_n2000` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8fr_n8000` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8xy_n500` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8xy_n2000` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8xy_n8000` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8frxy_n500` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8frxy_n2000` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8frxy_n8000` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8fr` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8xy` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8frxy` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `T8i` | AirfRANS (`rhmp.tasks.airfrans`) | 256 | 4 | 8 |
+| `AFV` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFV_trap` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFVp` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFVp_trap` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFU` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFUv` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFD` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFP` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFPfr` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFPxy` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFPfrxy` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFPi` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFPi0` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFPiU` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFPiR` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFPs` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFPcp` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFPcpxy` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFPpf` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFVo` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `AFVpo` | AirfRANS (`rhmp.tasks.airfrans`) | 128 | 4 | 8 |
+| `MXS` | magnetostatics (`rhmp.tasks.maxwell`) | 128 | 4 | 64 |
+| `MXE` | magnetostatics (`rhmp.tasks.maxwell`) | 128 | 4 | 64 |
+| `MXA` | magnetostatics (`rhmp.tasks.maxwell`) | 128 | 4 | 64 |
+| `MXA_noorient` | magnetostatics (`rhmp.tasks.maxwell`) | 128 | 4 | 64 |
 
 ### Models: `python -m rhmp.train --model NAME` (`rhmp.baselines.registry.SPECS`)
 
@@ -5446,17 +7643,32 @@ usage: python -m rhmp.train [-h] --task TASK [--native | --legacy] [--root ROOT]
                   [--model-opts MODEL_OPTS] [--C C] [--layers LAYERS]
                   [--metric-type {diag,tensor}]
                   [--resolvent-iters RESOLVENT_ITERS]
-                  [--resolvent-grad {implicit,unrolled}] [--latent K:R[,K:R]]
+                  [--resolvent-grad {implicit,unrolled}]
+                  [--resolvent-physical] [--latent K:R[,K:R]]
                   [--metric-ref K:COL[,K:COL]] [--material K:M[,K:M]]
                   [--solver-mode] [--solve-iters SOLVE_ITERS]
-                  [--solve-precond {none,twolevel}]
-                  [--solve-bc {dirichlet,none,neumann}]
+                  [--solve-tol SOLVE_TOL] [--solve-precond {none,twolevel}]
+                  [--solve-bc {dirichlet,none,neumann,lift}]
+                  [--solve-picard J] [--picard-relax W]
+                  [--picard-init {zero,learned}] [--no-metric-geo]
                   [--tensor-param {full,cone}] [--aux-pde W]
-                  [--no-learn-metric] [--poly POLY] [--log-range LOG_RANGE]
-                  [--metric-hidden METRIC_HIDDEN]
+                  [--no-learn-metric] [--transport JSON] [--poly POLY]
+                  [--log-range LOG_RANGE] [--metric-hidden METRIC_HIDDEN]
                   [--scaling {dec,jacobi,none}] [--tie | --untie] [--no-cross]
-                  [--gate {norm,relu,none}] [--identity-metric]
-                  [--star {cotan,barycentric,unit}]
+                  [--gate {norm,relu,none,homog}] [--term-gates]
+                  [--cochain-head {linear,gated,context}] [--lift-context P]
+                  [--lift-vertex] [--readout-depth READOUT_DEPTH]
+                  [--readout-spatial] [--readout-skip] [--frozen-units]
+                  [--frozen-descriptors {train,mesh,auto}]
+                  [--no-frozen-descriptors] [--readout-wedge H]
+                  [--readout-layers {last,all}] [--amplitude K:N[,K:N]]
+                  [--amplitude-power P] [--amplitude-energy]
+                  [--readout-energy H] [--readout-energy-clip C] [--no-kutta]
+                  [--kutta-range KUTTA_RANGE] [--kutta-corner S]
+                  [--project-solver {cg,direct,dense}]
+                  [--readout-hidden READOUT_HIDDEN] [--lifting {mlp,linear}]
+                  [--readout-head {mlp,linear}] [--fit-readout]
+                  [--identity-metric] [--star {cotan,barycentric,unit}]
                   [--vector-mode {ls,direct}] [--connection-odd {on,off}]
                   [--no-connection] [--no-output-map] [--batch BATCH]
                   [--bs-meshes BS_MESHES] [--eval-batch EVAL_BATCH] [--lr LR]
@@ -5517,13 +7729,18 @@ options:
                         '{"n_layers": 8}' or '{"hidden": 64}'
   --C C                 hidden channels (default: v1 C of the task)
   --layers LAYERS       depth (e.g. 4; default: task default) or per-layer
-                        types, e.g. poly,poly,resolvent,poly
+                        types (poly | resolvent | solve | project), e.g.
+                        poly,poly,resolvent,poly or project,poly,poly,poly
   --metric-type {diag,tensor}
                         diagonal metrics (default) or the Whitney/Galerkin
                         material-tensor metric (DESIGN 9.1)
   --resolvent-iters RESOLVENT_ITERS
                         CG iterations of resolvent layers
   --resolvent-grad {implicit,unrolled}
+  --resolvent-physical  resolvent layers use the un-normalised physical
+                        operator (I + tau L^2 Delta_H)^-1
+                        (RHMPConfig.resolvent_normalize=False; needed for
+                        tensor metrics in resolvent layers)
   --latent K:R[,K:R]    r learnable per-cell input columns on degree k
                         (RHMPConfig.latent_dims), e.g. 1:8; tied to one mesh:
                         shared-mesh tasks only
@@ -5544,15 +7761,33 @@ options:
                         other types)
   --solve-iters SOLVE_ITERS
                         CG iterations of solve layers (default 64)
+  --solve-tol SOLVE_TOL
+                        relative CG residual at which solve layers stop early
+                        (default 1e-6)
   --solve-precond {none,twolevel}
                         CG preconditioner of solve layers (default none =
                         Jacobi; twolevel = Jacobi + coarse correction on
                         spatial aggregates, vertex solves)
-  --solve-bc {dirichlet,none,neumann}
+  --solve-bc {dirichlet,none,neumann,lift}
                         solve layers: fixed boundary cells (K.boundary /
-                        K.meta['dirichlet']), none, or neumann (no fixed
-                        cells, zero-mean vertex solution of the pure Neumann
-                        problem, e.g. T5/T5g)
+                        K.meta['dirichlet']), none, neumann (no fixed cells,
+                        zero-mean vertex solution of the pure Neumann problem,
+                        e.g. T5/T5g), or lift (fixed cells keep the layer
+                        input: inhomogeneous Dirichlet data, e.g. electrode
+                        potentials)
+  --solve-picard J      fixed-point (Picard) iterations of the vertex solve of
+                        solve layers with a state-dependent metric (field-
+                        energy invariant of the previous iterate;
+                        RHMPConfig.solve_picard; default 0)
+  --picard-relax W      initial relaxation omega in (0, 1) of the Picard
+                        iteration (learnable; default 0.5)
+  --picard-init {zero,learned}
+                        state of the first Picard iteration: zero field
+                        (default) or a learnable uniform energy invariant
+                        (RHMPConfig.picard_init)
+  --no-metric-geo       metric heads without geometric descriptors (material,
+                        feature and Picard invariants only;
+                        RHMPConfig.metric_geo=False)
   --tensor-param {full,cone}
                         tensor metrics: full SPD tensors b expm(sum s t t^T)
                         (default) or the edge cone b I + sum a t t^T with a >=
@@ -5566,6 +7801,11 @@ options:
   --no-learn-metric     freeze the metric at the reference (H = star exp(ref);
                         RHMPConfig.learn_metric=False): the pure DEC/FEEC
                         physics prior without metric heads
+  --transport JSON      transport term of the vertices (RHMPConfig.transport,
+                        rhmp.transport), e.g. '{"inputs": [0], "order": 2}'
+                        (input column 0 of degree 1 as the transport field),
+                        '{"latent": 2, "hidden": 1}'; keys inputs, latent,
+                        hidden, forms, order, norm, metric
   --poly POLY
   --log-range LOG_RANGE
   --metric-hidden METRIC_HIDDEN
@@ -5573,7 +7813,95 @@ options:
   --tie
   --untie
   --no-cross
-  --gate {norm,relu,none}
+  --gate {norm,relu,none,homog}
+                        update gate: norm (bounded radial gate, default),
+                        homog (homogeneous of degree one in the field
+                        amplitude), relu (ablation), none (linear)
+  --term-gates          per-term gates in polynomial layers (every power L^p x
+                        and cross term gets a per-cell factor from scale-
+                        invariant invariants; RHMPConfig.term_gates)
+  --cochain-head {linear,gated,context}
+                        head of cochain:k readouts: linear (default), gated
+                        (odd linear map x even gate) or context (gated, with
+                        the lower-degree features of the cell)
+  --lift-context P      lifting gates of degrees >= 1 also see the vertex mean
+                        of a P-dim projection of the lifted vertex features
+                        (RHMPConfig.lift_context; default 0)
+  --lift-vertex         the vertex lifting also sees the codifferential of the
+                        odd edge inputs and vertex means of edge-input
+                        invariants (RHMPConfig.lift_vertex)
+  --readout-depth READOUT_DEPTH
+                        odd gated stages of the gated / context cochain heads
+                        (default 1)
+  --readout-spatial     later stages of a deep cochain head (--readout-depth
+                        >= 2) also mix neighbouring cells through the
+                        combinatorial Hodge Laplacian
+                        (RHMPConfig.readout_spatial)
+  --readout-skip        gated / context cochain heads also read the odd inputs
+                        of their degree and the coboundary of the odd inputs
+                        one degree below (linear input skip;
+                        RHMPConfig.readout_skip)
+  --frozen-units        per-mesh geometric normalisers (star means, descriptor
+                        medians, block bounds) of the training mesh, stored in
+                        the model and used on every mesh
+                        (RHMPConfig.frozen_units)
+  --frozen-descriptors {train,mesh,auto}
+                        with --frozen-units: relative descriptors in training-
+                        mesh units ('train', the default), relative to each
+                        mesh ('mesh': only star means and block bounds frozen)
+                        or per column 'auto' (training units while the mesh's
+                        median lies in the training range;
+                        RHMPConfig.frozen_descriptors True / False / 'auto')
+  --no-frozen-descriptors
+                        same as --frozen-descriptors mesh
+  --readout-wedge H     gated / context head of a cochain:2 readout also reads
+                        H face wedge products of projections of the final edge
+                        features (RHMPConfig.readout_wedge; default 0)
+  --readout-layers {last,all}
+                        cochain readouts read the features after the lifting
+                        and after every layer (all) or after the last layer
+                        only (last, default)
+  --amplitude K:N[,K:N]
+                        the first N input columns of degree K scale with one
+                        field amplitude: they are divided by their per-sample
+                        RMS and the output is multiplied by it
+                        (RHMPConfig.amplitude_dims), e.g. 1:2 on T1p (velocity
+                        1-form and its even companion)
+  --amplitude-power P   the output is multiplied by s^P (default 1; 2:
+                        homogeneous of degree two in the amplitude columns,
+                        e.g. pressure for a velocity 1-form;
+                        RHMPConfig.amplitude_power)
+  --amplitude-energy    the output factor s is the field magnitude of the
+                        amplitude 1-form (Galerkin energy density over the
+                        domain, mesh independent) instead of the RMS cochain
+                        value (RHMPConfig.amplitude_energy)
+  --readout-energy H    node_scalar readout with H Galerkin energy densities
+                        of projections of the edge features at the vertices
+                        (RHMPConfig.readout_energy; default 0)
+  --readout-energy-clip C
+                        bound the energy channels: q -> C tanh(q / C)
+                        (RHMPConfig.readout_energy_clip; default off)
+  --no-kutta            'project' layers without the harmonic (Kutta)
+                        correction (RHMPConfig.project_harmonic=False)
+  --kutta-range KUTTA_RANGE
+                        bound of the log Kutta weights (default 8)
+  --kutta-corner S      corner prior of the Kutta weights with initial slope S
+                        (RHMPConfig.kutta_corner; default off)
+  --project-solver {cg,direct,dense}
+                        solver of 'project' layers: cg (default), direct
+                        (sparse LU on the CPU, diagonal metrics) or dense
+                        (batched Cholesky on the device, diagonal and tensor
+                        metrics, one graph per batch)
+  --readout-hidden READOUT_HIDDEN
+                        hidden width of the gated cochain head (16)
+  --lifting {mlp,linear}
+                        lifting of the field inputs (default mlp; linear: x_0
+                        = W f_0, no geometry or even gates)
+  --readout-head {mlp,linear}
+                        potential head of the grad readout (default mlp;
+                        linear: phi = Lin_nobias(x_0))
+  --fit-readout         initialise a linear readout by least squares on the
+                        first training batch (as --solver-mode does)
   --identity-metric
   --star {cotan,barycentric,unit}
   --vector-mode {ls,direct}

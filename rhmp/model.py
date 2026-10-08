@@ -23,13 +23,27 @@ import torch
 from torch import Tensor, nn
 from torch.utils.checkpoint import checkpoint as _checkpoint
 
-from .layers import LayerContext, RHMPLayer, make_context
+from .layers import LayerContext, RHMPLayer, make_context, unit_reference
 from .lifting import CochainLifting, input_layout
 from .readout import build_readout, parse_readout
+from .transport import normalize_transport, transport_columns
 
 __all__ = ["RHMPConfig", "RHMP"]
 
-_DICT_FIELDS = ("in_dims", "even_dims", "connection_dims", "metric_reference", "latent_dims", "material_dims")
+
+def _check_frozen_units(cfg: Any) -> None:
+    """``frozen_units`` covers the per-mesh normalisers of the polynomial and normalised resolvent stack (diagonal and
+    tensor metrics), of the transport fluxes and of projection layers (whose solve does not depend on the operator
+    normalisation or on the scale of the metric: only their descriptor units are frozen)."""
+    if (cfg.scaling == "jacobi" or any(t not in ("poly", "resolvent", "project") for t in cfg.layer_types)
+            or ("resolvent" in cfg.layer_types and not cfg.resolvent_normalize)
+            or (cfg.transport and cfg.transport.get("norm") == "sample")):
+        raise ValueError("frozen_units supports diagonal and tensor metrics, scaling 'dec' or 'none', polynomial, "
+                         "normalised resolvent and projection layers and transport fluxes with norm 'metric'")
+
+
+_DICT_FIELDS = ("in_dims", "even_dims", "connection_dims", "metric_reference", "latent_dims", "material_dims",
+                "amplitude_dims")
 
 
 @dataclass
@@ -50,8 +64,9 @@ class RHMPConfig:
         tie_metrics: one metric per degree (up uses ``H_m``, down uses ``1/H_m``) vs. separate up/down heads.
         scaling: ``'dec' | 'jacobi' | 'none'`` operator scaling.
         cross: cross-degree transport terms.
-        gate: ``'norm'`` (radial gate), ``'relu'`` (ablation) or ``'none'`` (no nonlinearity; used by
-            :meth:`solver_preset`).
+        gate: ``'norm'`` (radial gate), ``'relu'`` (ablation), ``'none'`` (no nonlinearity; used by
+            :meth:`solver_preset`) or ``'homog'`` (gate homogeneous of degree one in the field amplitude:
+            ``x + gamma g(xi) m`` with scale-invariant invariants ``xi``, see ``rhmp.layers.RadialGate``).
         identity_metric: every metric ``H = 1`` (ablation of the learned metric, DESIGN §3.2): no learned correction
             and no reference star inside ``H``.  With ``scaling='dec'`` the blocks still carry the DEC stars of their
             own degree through the symmetric scaling ``S`` (``S_up = star_k``, ``S_down = 1/star_k``), so the geometric
@@ -67,7 +82,8 @@ class RHMPConfig:
         connection_odd: connection columns also enter the ordinary odd path (non-Abelian connections).
         lift_hidden: hidden width of the even lifting gates ``e_k``.
         fused: fused polynomial-block kernels (``False`` = plain autograd reference path, same maths).
-        layers: per-layer types, e.g. ``['poly', 'poly', 'resolvent', 'poly']`` (DESIGN §9.2); ``None`` means
+        layers: per-layer types (``'poly' | 'resolvent' | 'solve' | 'project'``), e.g. ``['poly', 'poly', 'resolvent',
+            'poly']`` (DESIGN §9.2) or ``['project', 'poly', 'poly', 'poly']``; ``None`` means
             ``['poly'] * n_layers``.  When given it defines the depth (``n_layers`` is set to ``len(layers)``).
         resolvent_iters: CG iterations of resolvent layers (default 20).  The solve acts identically on every
             channel and commutes with channel mixing (``M^{-1}(x Q) = (M^{-1} x) Q``), so no equivariant channel
@@ -100,13 +116,70 @@ class RHMPConfig:
             count grows like the square root of the mesh condition number; warm starts reuse the previous solve layer)
             and boundary condition (``'dirichlet'``: ``K.meta['dirichlet'][k]`` or ``K.boundary[k]`` fixed; ``'none'``:
             no fixed cells; ``'neumann'``: no fixed cells and vertex solves return the zero-mean (lumped mass)
-            solution of the pure Neumann problem, as in the T5 generator).
+            solution of the pure Neumann problem, as in the T5 generator; ``'lift'``: the fixed cells of
+            ``'dirichlet'`` keep the layer input, i.e. inhomogeneous Dirichlet data such as electrode potentials).
             A solve layer computes ``y_k = (Delta_H + lam / L^2)^{-1} x_k`` with the un-normalised metric Hodge
             Laplacian ``Delta_H`` (FEM stiffness / lumped mass for k = 0) and ``lam = softplus(log_lam)`` (init 1e-3,
             ``L^D`` = domain measure).  See :meth:`solver_preset`.
         readout_head: ``'mlp'`` (default) or ``'linear'``: the potential head of the ``grad`` readout
             (``phi = MLP(x_0)`` or ``phi = Lin_nobias(x_0)``); the solver preset uses ``'linear'`` so that the model
             stays linear in the field inputs.
+        term_gates: per-term gates in polynomial layers (``rhmp.layers.TermGate``): ``m_k = sum_j c_j g_j t_j`` over
+            the powers ``L^p x_k`` and the cross terms, with per-cell factors ``g_j`` from scale-invariant
+            invariants of the term vectors (default ``False``: the plain polynomial message).
+        cochain_head: ``'linear'`` (default), ``'gated'`` or ``'context'``: head of ``cochain:k`` readouts
+            (``'gated'``: odd linear map times an even gate from invariants and the even inputs of degree k;
+            ``'context'``: the gated head with the coboundary of the degree ``k-1`` features in the odd part and the
+            vertex mean of the vertex features in the gate; ``rhmp.readout.CochainReadout``).
+        readout_hidden: hidden width of the gated cochain heads.
+        lift_context: ``p > 0``: the even lifting gates of degrees ``k >= 1`` also see the vertex mean over the cell of a
+            projection ``P x_0`` (``C -> p``) of the lifted vertex features (default 0: off; ``rhmp.lifting``).
+        lift_vertex: the vertex MLP of the lifting also sees the DEC codifferential of the odd edge inputs and the
+            vertex means of their squares and of the even edge inputs (default False; ``rhmp.lifting``).
+        readout_depth: number of odd gated stages of the gated / context cochain heads (default 1).
+        readout_spatial: the further stages of a deep gated / context head (``readout_depth >= 2``) also mix the
+            neighbouring k-cells through the combinatorial Hodge Laplacian of degree k (default False).
+        readout_skip: the gated / context head of ``cochain:k`` also reads the odd input columns of degree ``k`` and the
+            coboundary ``d_{k-1} f_{k-1}^odd`` of the odd input columns of degree ``k-1`` through bias-free linear maps
+            (a linear skip from the inputs, e.g. the circulation of the velocity 1-form on faces; default False).
+        readout_wedge: ``h > 0``: the gated / context head of a ``cochain:2`` readout also reads ``h`` wedge products
+            ``(x_1 A_j) ^ (x_1 B_j)`` of two projections of the final edge features (metric-free cup product of
+            1-cochains on the faces; a true 2-cochain, so the output keeps its orientation parity), e.g. the
+            advection ``theta ^ delta(d theta)`` of a vorticity 2-form; default 0: off (``rhmp.readout.face_wedge``).
+        readout_layers: ``'last'`` (default) or ``'all'``: ``cochain:k`` readouts read the features of degree k after
+            the lifting and after every layer, each through its own linear map (``u = sum_l W_l x_k^(l)``), so that
+            different output channels combine different filters of the stack (``rhmp.readout.CochainReadout``).
+        amplitude_dims: ``{k: n}``: the first ``n`` columns of ``inputs[k]`` scale with one field amplitude (e.g. the
+            velocity 1-form and its even companion): they are divided by their per-sample RMS ``s`` (over all such
+            columns and cells; per graph in block-diagonal batches) and the output is multiplied by ``s``, so the model
+            is exactly homogeneous of degree one in that amplitude (the other inputs, e.g. densities, are not
+            scaled).  ``s`` is invariant under orientation changes, relabelling, E(n) and O(C), and per sample.
+        amplitude_power: the output is multiplied by ``s^p`` (default 1); ``p = 2``: homogeneous of degree two in the
+            amplitude columns (e.g. a pressure for a velocity 1-form: dynamic similarity); ``p = 0``: the output is
+            not rescaled (a nondimensional output, e.g. a pressure coefficient).
+        amplitude_energy: the output factor ``s`` is the field magnitude of the amplitude 1-form columns of degree 1,
+            ``s_E = sqrt(sum_f theta_f^T M_f theta_f / sum_f |f|)`` (Galerkin energy density over the domain; exactly
+            ``|u|`` for the 1-form of a uniform field ``u`` on any simplicial mesh), instead of the RMS of the cochain
+            values, which scales with the edge lengths; the inputs are still divided by the RMS.  The same energy
+            density (of the normalised columns) is the reference of energy readouts and projection layers
+            (``rhmp.layers.reference_energy``).  Needs ``amplitude_dims[1] > 0`` and Whitney blocks (default False).
+        readout_energy: ``h > 0``: the ``node_scalar`` readout also reads ``h`` Galerkin energy densities
+            ``<x_1 A_j, x_1 B_j>`` of projections of the final edge features at the vertices (symmetric quadratic forms
+            in the reference metric; ``rhmp.readout.NodeScalarReadout``); default 0: off.
+        readout_energy_clip: ``c > 0``: the energy channels are bounded, ``q -> c tanh(q / c)`` (default 0: off).
+        project_harmonic: ``'project'`` layers (``layers=[..., 'project', ...]``: metric Hodge projection of the edge
+            features with the learned edge metric, ``rhmp.layers.RHMPLayer._project_forward``) also remove the
+            circulation along the cohomology generators ``K.meta['cohomology'][1]`` in a learned Kutta metric
+            (default True; no effect on complexes without generators).
+        kutta_range: bound ``a`` of the log Kutta weights of projection layers (default 8).
+        kutta_corner: ``s > 0``: prior of the Kutta weights at re-entrant corners of the boundary,
+            ``kappa = a tanh(MLP + s c_e)`` with a learnable slope initialised at ``s`` and the corner indicator
+            ``c_e`` of ``rhmp.layers.boundary_corner`` (default 0: the weights are learned from a uniform start).
+        project_solver: solver of projection layers: ``'cg'`` (default; preconditioned CG with ``solve_iters``,
+            ``solve_tol``, ``solve_precond``) or ``'direct'`` (sparse LU per graph and sample on the CPU in float64 with
+            adjoint gradients; exact, diagonal metrics only) or ``'dense'`` (batched dense Cholesky on the device in
+            float64, one factorisation per sample; exact, diagonal and tensor metrics, one graph per batch:
+            :func:`rhmp.layers.dense_projection`).
         solve_precond: CG preconditioner of solve layers: ``'none'`` (Jacobi, default) or ``'twolevel'`` (Jacobi plus
             an additive coarse correction on per-graph spatial aggregates of about ``rhmp.layers.COARSE_AGG_SIZE``
             vertices, assembled per sample and graph; degree 0 only, other degrees keep Jacobi).  Same solution, far
@@ -126,6 +199,43 @@ class RHMPConfig:
             relative to the known coefficient.  Tensor metrics scale the material tensor instead: ``b_f`` by
             ``exp(mean of ref over the m-cells of f)`` and, for the edge metric, ``a_{f,j}`` by ``exp(ref of direction
             edge j)``.  Ignored with ``identity_metric``.
+        transport: transport term of the vertices (``rhmp.transport``; empty = off, the default).  Keys: ``inputs``
+            (odd columns of ``inputs[1]`` that are transport fields, e.g. a velocity one-form), ``latent`` (number of
+            latent edge columns used as fields), ``hidden`` (0-2 O(C)-invariant odd contractions of the hidden state),
+            ``forms`` (subset of ``cons, adv, upwind``), ``order`` (power ``P`` of the transport operator per layer),
+            ``norm`` (``'metric'``: fluxes ``H_1 phi`` with the Gershgorin-normalised metric, the field keeps its
+            magnitude; ``'sample'``: every field operator normalised per sample), ``metric`` (``'layer'``: the
+            layer's learned ``H_1``; ``'star'``: the reference star).  Each poly / resolvent layer adds
+            ``sum_p g_p T^p x_0`` to the vertex message, ``T = sum_j a_j C(F_j) + b_j A(F_j) + c_j U(F_j)``, with
+            scalar coefficients (init 0), conservative ``C``, advective ``A = C^T`` and upwind ``U`` operators of the
+            fluxes ``F_j = H_1 phi_j / beta``.  Solve and projection layers carry no transport term.
+        frozen_units: the per-mesh geometric normalisers (geometric means of the reference stars, medians behind the
+            relative descriptors, unit-metric bounds of the Hodge blocks) are those of the training mesh, stored in the
+            model by :meth:`RHMP.freeze_units` (the trainer calls it on the training complex), instead of being
+            recomputed on every mesh: on another mesh the stars are divided by the training geometric means, the
+            descriptors become ``log(x / median_train)`` and each block bound is ``beta(H) * beta_unit(train) /
+            beta_unit(mesh)``; tensor-metric blocks use ``rho * beta_unit(train)``, and resolvent layers and transport
+            fluxes the same block bounds.  On the training mesh the model is unchanged; it is no longer invariant to a
+            global change of length unit (default False; diagonal and tensor metrics, 'dec' / 'none' scaling,
+            polynomial and normalised resolvent layers, transport norm 'metric').
+        frozen_descriptors: with ``frozen_units``, also express the relative descriptors against the training medians
+            (default True).  False: only the operator normalisation is that of the training mesh (star means and block
+            bounds); the descriptors stay ``log(x / median_mesh)`` on every mesh.  ``'auto'``: decided per relative
+            column and mesh: training-mesh units if the mesh's median of the column, in training-mesh units, lies in
+            the [min, max] of that column on the training mesh, else relative to the mesh's own median (star means and
+            block bounds always in training-mesh units).  Ignored without frozen references.
+        solve_picard: number ``J`` of fixed-point (Picard) iterations of the vertex solve of ``'solve'`` layers with a
+            state-dependent metric (0, the default: one solve).  Iteration ``j`` predicts the vertex-block metric
+            (``H_1``, diagonal or tensor) from the usual descriptors plus the field-energy invariant of the previous
+            iterate (``y_0 = 0``) and solves with the layer input as right-hand side; ``y_j = y_{j-1} + omega (S(H_j) x
+            - y_{j-1})`` for ``j >= 2``, weight-tied, learnable ``omega`` (see ``RHMPLayer``).  For nonlinear
+            constitutive laws (e.g. saturable magnetic materials, ``nu(|B|)``).
+        picard_relax: initial relaxation ``omega`` in (0, 1) of the Picard iteration.
+        metric_geo: ``False``: the metric heads see no geometric descriptors (material columns, feature invariants and
+            the Picard energy invariant only), so the learned metric is a function of material and state alone (a
+            constitutive law without mesh-specific position cues).  Default ``True``.
+        picard_init: ``'zero'`` (default: the first Picard iteration starts from ``y_0 = 0``) or ``'learned'`` (a
+            learnable uniform starting energy invariant; see ``RHMPLayer``).
     """
 
     in_dims: dict[int, int]
@@ -166,6 +276,32 @@ class RHMPConfig:
     tensor_param: str = "full"
     solve_precond: str = "none"
     readout_head: str = "mlp"
+    term_gates: bool = False
+    cochain_head: str = "linear"
+    readout_hidden: int = 16
+    amplitude_dims: dict[int, int] = field(default_factory=dict)
+    lift_context: int = 0
+    lift_vertex: bool = False
+    readout_layers: str = "last"
+    readout_depth: int = 1
+    readout_skip: bool = False
+    readout_spatial: bool = False
+    readout_wedge: int = 0
+    frozen_units: bool = False
+    frozen_descriptors: bool | str = True
+    amplitude_power: int = 1
+    amplitude_energy: bool = False
+    readout_energy: int = 0
+    readout_energy_clip: float = 0.0
+    project_harmonic: bool = True
+    kutta_range: float = 8.0
+    project_solver: str = "cg"
+    kutta_corner: float = 0.0
+    transport: dict = field(default_factory=dict)
+    solve_picard: int = 0
+    picard_relax: float = 0.5
+    metric_geo: bool = True
+    picard_init: str = "zero"
 
     def __post_init__(self) -> None:
         for name in _DICT_FIELDS:
@@ -184,17 +320,50 @@ class RHMPConfig:
             raise ValueError("log_range must be > 0")
         if self.scaling not in ("dec", "jacobi", "none"):
             raise ValueError(f"scaling must be 'dec', 'jacobi' or 'none', got {self.scaling!r}")
-        if self.gate not in ("norm", "relu", "none"):
-            raise ValueError(f"gate must be 'norm', 'relu' or 'none', got {self.gate!r}")
+        if self.gate not in ("norm", "relu", "none", "homog"):
+            raise ValueError(f"gate must be 'norm', 'relu', 'none' or 'homog', got {self.gate!r}")
+        if self.cochain_head not in ("linear", "gated", "context"):
+            raise ValueError(f"cochain_head must be 'linear', 'gated' or 'context', got {self.cochain_head!r}")
+        if self.lift_context < 0:
+            raise ValueError("lift_context must be >= 0")
+        if self.readout_depth < 1:
+            raise ValueError("readout_depth must be >= 1")
+        if self.readout_wedge < 0:
+            raise ValueError("readout_wedge must be >= 0")
+        if self.readout_layers not in ("last", "all"):
+            raise ValueError(f"readout_layers must be 'last' or 'all', got {self.readout_layers!r}")
+        if self.readout_layers == "all" and parse_readout(self.readout)[0] != "cochain":
+            raise ValueError("readout_layers='all' needs a cochain:k readout")
+        if self.readout_wedge and parse_readout(self.readout) != ("cochain", 2):
+            raise ValueError("readout_wedge needs a cochain:2 readout")
+        if self.readout_energy < 0 or self.readout_energy_clip < 0:
+            raise ValueError("readout_energy and readout_energy_clip must be >= 0")
+        if self.readout_energy and parse_readout(self.readout)[0] != "node_scalar":
+            raise ValueError("readout_energy needs the node_scalar readout")
+        if int(self.amplitude_power) < 0:
+            raise ValueError("amplitude_power must be >= 0")
+        self.amplitude_power = int(self.amplitude_power)
+        if self.amplitude_energy and self.amplitude_dims.get(1, 0) < 1:
+            raise ValueError("amplitude_energy needs amplitude columns on degree 1 (amplitude_dims[1] >= 1)")
+        if not self.kutta_range > 0 or self.kutta_corner < 0:
+            raise ValueError("kutta_range must be > 0 and kutta_corner >= 0")
+        if self.project_solver not in ("cg", "direct", "dense"):
+            raise ValueError(f"project_solver must be 'cg', 'direct' or 'dense', got {self.project_solver!r}")
+        for k, n in self.amplitude_dims.items():
+            if n > self.in_dims.get(k, 0):
+                raise ValueError(f"amplitude_dims[{k}] = {n} exceeds in_dims[{k}] = {self.in_dims.get(k, 0)}")
+        if self.readout_hidden < 1:
+            raise ValueError("readout_hidden must be >= 1")
         if self.vector_mode not in ("ls", "direct"):
             raise ValueError(f"vector_mode must be 'ls' or 'direct', got {self.vector_mode!r}")
         parse_readout(self.readout)
         self.log_range = float(self.log_range)
         if self.layers is not None:
             self.layers = [str(t) for t in self.layers]
-            bad = [t for t in self.layers if t not in ("poly", "resolvent", "solve")]
+            bad = [t for t in self.layers if t not in ("poly", "resolvent", "solve", "project")]
             if bad or not self.layers:
-                raise ValueError(f"layers must be a non-empty list of 'poly'/'resolvent'/'solve', got {self.layers}")
+                raise ValueError(f"layers must be a non-empty list of 'poly'/'resolvent'/'solve'/'project', got "
+                                 f"{self.layers}")
             self.n_layers = len(self.layers)
         if self.resolvent_iters < 1:
             raise ValueError("resolvent_iters must be >= 1")
@@ -206,14 +375,20 @@ class RHMPConfig:
             raise ValueError(f"tensor_param must be 'cone' or 'full', got {self.tensor_param!r}")
         if self.lifting not in ("mlp", "linear"):
             raise ValueError(f"lifting must be 'mlp' or 'linear', got {self.lifting!r}")
-        if self.solve_bc not in ("dirichlet", "none", "neumann"):
-            raise ValueError(f"solve_bc must be 'dirichlet', 'none' or 'neumann', got {self.solve_bc!r}")
+        if self.solve_bc not in ("dirichlet", "none", "neumann", "lift"):
+            raise ValueError(f"solve_bc must be 'dirichlet', 'none', 'neumann' or 'lift', got {self.solve_bc!r}")
         if self.readout_head not in ("mlp", "linear"):
             raise ValueError(f"readout_head must be 'mlp' or 'linear', got {self.readout_head!r}")
         if self.solve_precond not in ("none", "twolevel"):
             raise ValueError(f"solve_precond must be 'none' or 'twolevel', got {self.solve_precond!r}")
         if self.solve_iters < 1 or not self.solve_tol >= 0:
             raise ValueError("need solve_iters >= 1 and solve_tol >= 0")
+        if self.solve_picard < 0 or not 0.0 < self.picard_relax < 1.0:
+            raise ValueError("need solve_picard >= 0 and 0 < picard_relax < 1")
+        if self.solve_picard > 0 and "solve" not in self.layer_types:
+            raise ValueError("solve_picard > 0 needs a 'solve' layer (layers=[..., 'solve', ...])")
+        if self.picard_init not in ("zero", "learned"):
+            raise ValueError(f"picard_init must be 'zero' or 'learned', got {self.picard_init!r}")
         for k, M in self.material_dims.items():
             if M > self.even_dims.get(k, 0):
                 raise ValueError(f"material_dims[{k}] = {M} exceeds even_dims[{k}] = {self.even_dims.get(k, 0)}: "
@@ -223,6 +398,15 @@ class RHMPConfig:
             if not F - E <= col < F:
                 raise ValueError(f"metric_reference[{m}] = {col} must index an even column of inputs[{m}] "
                                  f"(columns {F - E}..{F - 1})")
+        self.transport = normalize_transport(self.transport)
+        if self.transport:
+            if self.scaling == "jacobi":
+                raise ValueError("transport needs scaling 'dec' or 'none'")
+            transport_columns(self)                                           # validates the field columns
+        if self.frozen_units:
+            _check_frozen_units(self)
+        if self.frozen_descriptors not in (True, False, "auto"):
+            raise ValueError(f"frozen_descriptors must be True, False or 'auto', got {self.frozen_descriptors!r}")
 
     @classmethod
     def solver_preset(cls, **kw: Any) -> "RHMPConfig":
@@ -304,12 +488,17 @@ class RHMP(nn.Module):
                       log_range=cfg.log_range, tie_metrics=cfg.tie_metrics, scaling=cfg.scaling, cross=cfg.cross,
                       gate=cfg.gate, identity_metric=cfg.identity_metric, fused=cfg.fused, kind=kind,
                       resolvent_iters=cfg.resolvent_iters, resolvent_grad=cfg.resolvent_grad,
-                      metric_type=cfg.metric_type if (kind in ("poly", "solve") or
+                      metric_type=cfg.metric_type if (kind in ("poly", "solve", "project") or
                                                       (kind == "resolvent" and not cfg.resolvent_normalize)) else "diag",
                       resolvent_warm_start=cfg.resolvent_warm_start, learn_metric=cfg.learn_metric,
                       resolvent_normalize=cfg.resolvent_normalize, solve_iters=cfg.solve_iters,
                       solve_tol=cfg.solve_tol, solve_bc=cfg.solve_bc, tensor_param=cfg.tensor_param,
-                      solve_precond=cfg.solve_precond)
+                      solve_precond=cfg.solve_precond, term_gates=cfg.term_gates and kind == "poly",
+                      project_harmonic=cfg.project_harmonic, kutta_range=cfg.kutta_range,
+                      project_solver=cfg.project_solver, kutta_corner=cfg.kutta_corner,
+                      transport=cfg.transport if kind not in ("solve", "project") else None,
+                      solve_picard=cfg.solve_picard if kind == "solve" else 0, picard_relax=cfg.picard_relax,
+                      metric_geo=cfg.metric_geo, picard_init=cfg.picard_init)
             for kind in cfg.layer_types
         ])
         self.readout = build_readout(cfg, gd)
@@ -360,7 +549,67 @@ class RHMP(nn.Module):
             if key.startswith("latent.") and key.split(".", 1)[1] not in self.latent:
                 p = next(self.parameters())
                 self.latent[key.split(".", 1)[1]] = nn.Parameter(torch.empty(val.shape, dtype=p.dtype, device=p.device))
+            if key.startswith("frozen_") and not hasattr(self, key):          # checkpointed frozen_units references
+                dev = next(self.parameters()).device
+                self.register_buffer(key, torch.empty(val.shape, dtype=val.dtype, device=dev))
+        self._frozen_key = None
         return super().load_state_dict(state_dict, strict=strict, assign=assign)
+
+    # ---------------------------------------------------------------------------------------------------------
+    def _block_keys(self) -> list[tuple[int, bool]]:
+        return [(k, up) for k in range(self.top + 1) for up in (True, False)
+                if not ((up and k >= self.top) or (not up and k <= 0))]
+
+    def freeze_units(self, K: Any) -> "RHMP":
+        """Store the per-mesh geometric normalisers of ``K`` (the training mesh, one complex) as buffers
+        (``frozen_log_gm``, ``frozen_geo_<k>``, ``frozen_beta``; the descriptor ranges ``frozen_geo_min_<k>`` /
+        ``frozen_geo_max_<k>`` for ``frozen_descriptors='auto'``) and use them on every mesh from now on
+        (``RHMPConfig.frozen_units``; :func:`rhmp.layers.unit_reference`).  The output on ``K`` itself is unchanged, so
+        a model trained without the option can be evaluated with it by calling this on its training mesh.
+
+        Returns:
+            ``self``.
+        """
+        _check_frozen_units(self.cfg)
+        p = next(self.parameters())
+        ref = unit_reference(K, self.cfg.scaling, torch.float64 if p.dtype == torch.float64 else p.dtype)
+        vals = {"frozen_log_gm": ref["log_gm"].to(torch.float64),
+                "frozen_beta": torch.stack([ref["beta_unit"][key].to(torch.float64) for key in self._block_keys()])}
+        for k in range(self.top + 1):
+            vals[f"frozen_geo_{k}"] = ref["geo_log_median"][k].to(torch.float64)
+            vals[f"frozen_geo_min_{k}"], vals[f"frozen_geo_max_{k}"] = ref["geo_min"][k], ref["geo_max"][k]
+        for name, v in vals.items():
+            v = v.to(p.device)
+            if hasattr(self, name):
+                getattr(self, name).data = v
+            else:
+                self.register_buffer(name, v)
+        self._frozen_key = None
+        return self
+
+    def frozen_reference(self) -> dict | None:
+        """The stored training-mesh normalisers in the form of :func:`rhmp.layers.make_context` (``frozen``), or
+        ``None`` if :meth:`freeze_units` has not been called (and no checkpoint carried them).  Without
+        ``cfg.frozen_descriptors`` the descriptor medians are left out (``geo_log_median=None``); with ``'auto'`` the
+        descriptor ranges of the training mesh are added (``geo_range``)."""
+        if not hasattr(self, "frozen_log_gm"):
+            return None
+        desc = self.cfg.frozen_descriptors
+        geo = [getattr(self, f"frozen_geo_{k}") for k in range(self.top + 1)] if desc else None
+        rng = None
+        if desc == "auto":
+            if not hasattr(self, "frozen_geo_min_0"):
+                raise ValueError("frozen_descriptors='auto': the references carry no descriptor ranges (stored by an "
+                                 "older version); call model.freeze_units(K_train) again")
+            rng = [(getattr(self, f"frozen_geo_min_{k}"), getattr(self, f"frozen_geo_max_{k}"))
+                   for k in range(self.top + 1)]
+        beta = dict(zip(self._block_keys(), self.frozen_beta.unbind(0)))
+        key = getattr(self, "_frozen_key", None)
+        if key is None or key[1] != desc:                        # operator-cache key (computed once per reference)
+            key = ("frozen", desc, tuple(float(v) for v in self.frozen_log_gm),
+                   tuple(float(v) for v in self.frozen_beta), tuple(tuple(float(v) for v in g) for g in geo or ()))
+            self._frozen_key = key
+        return dict(log_gm=self.frozen_log_gm, geo_log_median=geo, geo_range=rng, beta_unit=beta, key=key)
 
     def _with_latents(self, inputs: dict[int, Tensor], K: Any, B: int) -> dict[int, Tensor]:
         """``inputs`` with the latent columns inserted before the even block of each latent degree."""
@@ -442,26 +691,91 @@ class RHMP(nn.Module):
                 raise ValueError(f"cfg.in_dims[{k}] = {F} but inputs has no degree {k}")
         B = 1 if B is None else B
         inputs = {k: (t if t.dtype == dtype else t.to(dtype)) for k, t in inputs.items()}
+        amp = self._amplitude(inputs, K) if self.cfg.amplitude_dims else None
+        if amp is not None:                                     # field-amplitude columns divided by s per sample
+            inputs = dict(inputs)
+            for k, n in self.cfg.amplitude_dims.items():
+                if n > 0:
+                    sc = (amp if K.batch is None else amp[K.batch[k]]).unsqueeze(-1)       # (1|n_k, B, 1)
+                    t = inputs[k]
+                    inputs[k] = torch.cat([t[..., :n] / sc, t[..., n:]], dim=-1)
         even, ref = [], []
         for k in range(self.top + 1):
             lay = input_layout(self.cfg, k)
             even.append(inputs[k][..., lay["F"] - lay["E"]:] if lay["E"] > 0 else None)
             col = self.cfg.metric_reference.get(k)
             ref.append(inputs[k][..., col] if (col is not None and not self.cfg.identity_metric) else None)
-        ctx = make_context(K, scaling=self.cfg.scaling, B=B, dtype=dtype, even=even, record=self.record_diagnostics)
+        frozen = self.frozen_reference()
+        if self.cfg.frozen_units and frozen is None:
+            raise ValueError("frozen_units: call model.freeze_units(K_train) on the training mesh first "
+                             "(rhmp.train does)")
+        ctx = make_context(K, scaling=self.cfg.scaling, B=B, dtype=dtype, even=even, record=self.record_diagnostics,
+                           frozen=frozen)
         ctx.ref = ref
         ctx.resolvent_prev = {}
-        return self._with_latents(inputs, K, B), ctx
+        ctx.amplitude = amp
+        if amp is not None and self.cfg.amplitude_energy:       # field magnitude instead of the RMS cochain value
+            ctx.energy_ref = self._amplitude_energy(inputs, K)
+            ctx.amplitude = amp * torch.sqrt(ctx.energy_ref)
+        inputs = self._with_latents(inputs, K, B)
+        cols = transport_columns(self.cfg)
+        if cols:                                                            # input / latent transport fields
+            ctx.transport_fields = inputs[1][..., cols].contiguous()
+        ctx.inputs = inputs                                     # raw (normalised) inputs, read by input-skip readouts
+        return inputs, ctx
+
+    def _amplitude(self, inputs: dict[int, Tensor], K: Any) -> Tensor:
+        """Per-sample RMS ``s`` of the field-amplitude columns (``cfg.amplitude_dims``): ``(1, B)`` for a single complex,
+        ``(num_graphs, B)`` for a block-diagonal batch (floored at 1e-30)."""
+        from . import ops
+        num = cnt = 0.0
+        for k, n in self.cfg.amplitude_dims.items():
+            if n <= 0:
+                continue
+            sq = inputs[k][..., :n].square().sum(-1)                                  # (n_k, B)
+            if K.batch is None:
+                num = num + sq.sum(0, keepdim=True)
+                cnt = cnt + float(sq.shape[0] * n)
+            else:
+                G = int(K.num_graphs)
+                num = num + ops.segment_sum(sq, K.batch[k], G)
+                cnt = cnt + n * torch.bincount(K.batch[k], minlength=G).to(sq.dtype).unsqueeze(-1)
+        return torch.sqrt(num / cnt).clamp_min(1e-30)
+
+    def _amplitude_energy(self, inputs: dict[int, Tensor], K: Any) -> Tensor:
+        """Galerkin energy density of the (RMS-normalised) amplitude 1-form columns over the domain,
+        ``sum_f theta_f^T M_f theta_f / sum_f |f|`` averaged over the columns: ``(1, B)`` for a single complex,
+        ``(num_graphs, B)`` for a block-diagonal batch.  For the 1-form of a uniform field ``u`` it is ``|u|^2`` in the
+        normalised units, on any simplicial mesh (``rhmp.dec.whitney_energy``)."""
+        from . import ops
+        from .dec import top_measure, whitney_energy
+        if not getattr(K, "whitney", None) or 1 not in K.whitney:
+            raise ValueError("amplitude_energy needs the Whitney blocks K.whitney[1] (simplicial complexes; load the "
+                             "task with whitney=True)")
+        n = self.cfg.amplitude_dims[1]
+        e = whitney_energy(K, inputs[1][..., :n]).sum(-1) / n                         # (n_top, B)
+        meas = top_measure(K).to(e.dtype)
+        if K.batch is None:
+            E = e.sum(0, keepdim=True) / meas.sum()
+        else:
+            G = int(K.num_graphs)
+            E = ops.segment_sum(e, K.batch[self.top], G) / ops.segment_sum(meas, K.batch[self.top], G).unsqueeze(-1)
+        return E.clamp_min(1e-30)
 
     def _propagate(self, x: list[Tensor], ctx: LayerContext, last_degrees: list[int] | None = None) -> list[Tensor]:
-        """Run the layers; the last one only updates ``last_degrees`` (all degrees if ``None``)."""
+        """Run the layers; the last one only updates ``last_degrees`` (all degrees if ``None``).  With
+        ``ctx.history`` (a list; multi-layer readout) the features of the readout degree are appended after each
+        layer."""
         n = len(self.layers)
+        hist = getattr(ctx, "history", None)
         for i, layer in enumerate(self.layers):
             degrees = last_degrees if i == n - 1 else None
             if self.cfg.checkpoint_layers and torch.is_grad_enabled():
                 x = _checkpoint(layer, x, ctx, degrees, use_reentrant=False)
             else:
                 x = layer(x, ctx, degrees)
+            if hist is not None:
+                hist.append(x[self.feature_degree])
         return x
 
     # ---------------------------------------------------------------------------------------------------------
@@ -477,9 +791,20 @@ class RHMP(nn.Module):
         """
         inputs, ctx = self._prepare(inputs, K)
         with self._autocast(K):
-            x = self._propagate(self.lifting(inputs, ctx), ctx, last_degrees=[self.feature_degree])
+            x = self.lifting(inputs, ctx)
+            if self.cfg.readout_layers == "all":                 # the readout sees the lifted field and every layer
+                ctx.history = [x[self.feature_degree]]
+            x = self._propagate(x, ctx, last_degrees=list(getattr(self.readout, "feature_degrees",
+                                                                  [self.feature_degree])))
             y = self.readout(x, ctx)
-        return y.to(ctx.dtype)
+        y = y.to(ctx.dtype)
+        if ctx.amplitude is not None:                           # homogeneous of degree p in the field amplitude
+            amp = ctx.amplitude if K.batch is None else ctx.amplitude[K.batch[self.output_degree]]
+            if self.cfg.amplitude_power != 1:
+                amp = amp ** self.cfg.amplitude_power
+            if self.cfg.amplitude_power != 0:
+                y = y * amp.unsqueeze(-1).to(y.dtype)
+        return y
 
     def lift(self, inputs: dict[int, Tensor], K: Any) -> dict[int, Tensor]:
         """Lifting only: ``{k: (n_k, B, C)}``."""
@@ -532,6 +857,50 @@ class RHMP(nn.Module):
                 out.append(layer.metric_fields(x, ctx))
                 x = layer(x, ctx)
         return out
+
+    @torch.no_grad()
+    def projection_fields(self, inputs: dict[int, Tensor], K: Any, probe: Tensor | None = None,
+                          layer: int | None = None) -> dict:
+        """What a projection layer does to a probe 1-cochain, with the metrics it computes for these inputs (analysis:
+        the learned potential flow, its circulation, the Kutta weights).
+
+        Args:
+            inputs, K: as for :meth:`forward`.
+            probe: ``(n1, B, P)`` cochains (default: the amplitude columns of ``inputs[1]`` after the amplitude
+                normalisation, i.e. the unit inflow 1-form).
+            layer: index of the projection layer (default: the first one).
+        Returns:
+            dict with ``u (n1, B, P)`` (probe projected, circulation removed), ``u_no_circulation`` (projection only),
+            ``alpha (n0, B, P)``, ``Gamma (S, B, r, P)``, ``gamma (n1, B, r)`` (``None`` without generators),
+            ``kappa (n1, B)`` (log Kutta weight relative to ``star1``), ``log_H_ratio (n1, B)`` (learned log edge
+            metric relative to the normalised reference star; ``None`` for tensor metrics), ``probe`` and
+            ``amplitude`` (the output amplitude ``(S, B)`` or ``None``).
+        """
+        kinds = self.cfg.layer_types
+        if layer is None:
+            if "project" not in kinds:
+                raise ValueError("the model has no projection layer")
+            layer = kinds.index("project")
+        if kinds[layer] != "project":
+            raise ValueError(f"layer {layer} is a {kinds[layer]!r} layer")
+        inputs, ctx = self._prepare(inputs, K)
+        ctx.record = False
+        with self._autocast(K):
+            x = self.lifting(inputs, ctx)
+            for i in range(layer):
+                x = self.layers[i](x, ctx)
+            if probe is None:
+                n = self.cfg.amplitude_dims.get(1, 0)
+                if n < 1:
+                    raise ValueError("projection_fields needs a probe (the model has no amplitude columns on degree 1)")
+                probe = inputs[1][..., :n]
+            probe = probe.to(ctx.dtype).contiguous()
+            core = self.layers[layer]._project_core(x, ctx, probe)
+        u0 = probe - core["dalpha"]
+        return dict(u=u0 if core["corr"] is None else u0 - core["corr"], u_no_circulation=u0, alpha=core["alpha"],
+                    Gamma=core["Gamma"], gamma=core["gamma"], kappa=core["kappa"],
+                    log_H_ratio=None if core["log_H"] is None else core["log_H"] - ctx.log_star[1].unsqueeze(1),
+                    probe=probe, amplitude=ctx.amplitude)
 
     def operator_residual(self, inputs: dict[int, Tensor], K: Any, u: Tensor, f: Tensor, k: int = 0, layer: int = -1,
                           bc: str | None = None) -> Tensor:
@@ -638,6 +1007,9 @@ class RHMP(nn.Module):
         else:
             raise ValueError(f"fit_linear_readout_ needs a linear readout (cochain:k, curl, div, mdiv, or grad with "
                              f"readout_head='linear'), got {self.cfg.readout!r}")
+        if getattr(ro, "head", "linear") != "linear" or getattr(ro, "n_hist", 1) != 1:
+            raise ValueError("fit_linear_readout_ needs the linear single-layer cochain head (cochain_head='linear', "
+                             "readout_layers='last')")
         lin = ro.lin
         C = F.shape[-1]
         if output_map is not None:

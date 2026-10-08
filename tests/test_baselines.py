@@ -414,7 +414,7 @@ def test_sccnn_normalised_needs_identity_init():
 
 
 def test_v1_edge_protocol():
-    """MPSN / SCCNN / Clifford on a v1 paper task: edge-averaged target (first component), v1 edge readout."""
+    """MPSN / SCCNN / Clifford on an original paper task: edge-averaged target (first component), v1 edge readout."""
     from rhmp.baselines.v1_wrappers import V1EdgeReadout
     K = FIXTURES["tri"]("cpu", None)
     td = tiny_task(K, "vector", name="T6")                        # node target with 2 components

@@ -1,0 +1,951 @@
+{
+ "env": {
+  "device": "cuda",
+  "tf32": true,
+  "threads": 8,
+  "torch": "2.10.0+cu128",
+  "tag": "proj",
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "gauge_mult": [
+   0.1,
+   1.0,
+   10.0
+  ],
+  "gauge_seed": 0
+ },
+ "task": "T6",
+ "condition_checks": {
+  "orig_regen": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 4.76837158203125e-07,
+   "max_abs_face_cochain": 4.910030841827393,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 5.960464477539063e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3050,
+    2027
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "new": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 4.76837158203125e-07,
+   "max_abs_face_cochain": 3.5256404876708984,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 5.960464477539063e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3052,
+    2029
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "aniso": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 4.76837158203125e-07,
+   "max_abs_face_cochain": 3.5256404876708984,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 5.960464477539063e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3052,
+    2029
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "fine": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 4.76837158203125e-07,
+   "max_abs_face_cochain": 1.8537063598632812,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 2.9802322387695312e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    4096,
+    12265,
+    8170
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "new_s1": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 2.384185791015625e-07,
+   "max_abs_face_cochain": 2.027768135070801,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 5.960464477539063e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3048,
+    2025
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "aniso_s1": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 2.384185791015625e-07,
+   "max_abs_face_cochain": 1.9298503398895264,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 5.960464477539063e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3048,
+    2025
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "new_s2": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 4.76837158203125e-07,
+   "max_abs_face_cochain": 7.72789192199707,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 1.1920928955078125e-07,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3046,
+    2023
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "aniso_s2": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 4.76837158203125e-07,
+   "max_abs_face_cochain": 7.72789192199707,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 1.1920928955078125e-07,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3046,
+    2023
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "new_s3": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 4.76837158203125e-07,
+   "max_abs_face_cochain": 5.928730010986328,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 5.960464477539063e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3053,
+    2030
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "aniso_s3": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 4.76837158203125e-07,
+   "max_abs_face_cochain": 5.928730010986328,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 1.1920928955078125e-07,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3053,
+    2030
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "graded": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 4.76837158203125e-07,
+   "max_abs_face_cochain": 3.952399253845215,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 1.1920928955078125e-07,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3054,
+    2031
+   ],
+   "faces_dropped_by_complex": 0
+  }
+ },
+ "conditions": [
+  "orig",
+  "orig_regen",
+  "new",
+  "aniso",
+  "fine",
+  "gauge_0.1",
+  "gauge_1",
+  "gauge_10",
+  "new_s1",
+  "aniso_s1",
+  "new_s2",
+  "aniso_s2",
+  "new_s3",
+  "aniso_s3",
+  "graded"
+ ],
+ "runs": {
+  "rhmp": {
+   "task": "T6",
+   "model": "rhmp",
+   "params": 72920,
+   "train_gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+   "stats_rel_diff_loaded_vs_saved": 0.0,
+   "target_protocol": null,
+   "eval_batch": 64,
+   "stored_test100": {
+    "R2": 0.9999638096476061,
+    "SSIM": 0.9999401987886407,
+    "Pearson": 0.9999118328920793,
+    "NRMSE": 8.925380996362913e-05,
+    "MSE": 3.8104989831368745e-05,
+    "MAE": 0.005893205548718614,
+    "R2_v1": 0.9999638096400868,
+    "N": 100
+   },
+   "conditions": {
+    "orig": {
+     "R2": 0.9999638096476061,
+     "SSIM": 0.9999401987886407,
+     "Pearson": 0.9999118328920793,
+     "NRMSE": 8.925380996362913e-05,
+     "MSE": 3.8104989831368745e-05,
+     "MAE": 0.005893205548718614,
+     "R2_v1": 0.9999638096400868,
+     "N": 100,
+     "finite": true
+    },
+    "orig_regen": {
+     "R2": 0.9999638096498391,
+     "SSIM": 0.9999401987923326,
+     "Pearson": 0.999911832892592,
+     "NRMSE": 8.92538070781169e-05,
+     "MSE": 3.810498736765291e-05,
+     "MAE": 0.005893205479374191,
+     "R2_v1": 0.9999638096423429,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 42.58460235595703,
+     "seconds": 0.08083820343017578
+    },
+    "new": {
+     "R2": 0.9998005719079344,
+     "SSIM": 0.9998788205504182,
+     "Pearson": 0.9995245221681073,
+     "NRMSE": 0.0002485946717406147,
+     "MSE": 0.00019990459333328307,
+     "MAE": 0.00695134551626485,
+     "R2_v1": 0.9998005719072934,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 31.480926513671875,
+     "seconds": 0.0815434455871582
+    },
+    "aniso": {
+     "R2": 0.9999472339634875,
+     "SSIM": 0.9999297485822024,
+     "Pearson": 0.9998111354040182,
+     "NRMSE": 0.00010664963096092004,
+     "MSE": 5.1746512693685326e-05,
+     "MAE": 0.0063179114280544095,
+     "R2_v1": 0.9999472339675193,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 38.612754821777344,
+     "seconds": 0.08126997947692871
+    },
+    "fine": {
+     "R2": 0.9995079938620515,
+     "SSIM": 0.9998667828544785,
+     "Pearson": 0.9993243191704835,
+     "NRMSE": 0.0001185262111280581,
+     "MSE": 3.7277431288083334e-05,
+     "MAE": 0.006036338998340175,
+     "R2_v1": 0.999507993864983,
+     "N": 100,
+     "eval_batch_used": 8,
+     "finite": true,
+     "max_abs_pred_normalised": 29.841251373291016,
+     "seconds": 2.1882474422454834
+    },
+    "gauge_0.1": {
+     "R2": 0.9999638096108305,
+     "SSIM": 0.999940198766807,
+     "Pearson": 0.9999118324643711,
+     "NRMSE": 8.925385519814335e-05,
+     "MSE": 3.8105028552639814e-05,
+     "MAE": 0.005893207014024043,
+     "R2_v1": 0.9999638096034084,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 42.58460235595703,
+     "seconds": 0.08011054992675781,
+     "notes": {
+      "max_abs_diff_inputs_vs_independent_construction": 3.814697265625e-06
+     }
+    },
+    "gauge_1": {
+     "R2": 0.999963809638688,
+     "SSIM": 0.999940198781007,
+     "Pearson": 0.9999118322077755,
+     "NRMSE": 8.925382088252708e-05,
+     "MSE": 3.810499922131554e-05,
+     "MAE": 0.005893204897521081,
+     "R2_v1": 0.9999638096312353,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 42.58460235595703,
+     "seconds": 0.0799875259399414,
+     "notes": {
+      "max_abs_diff_inputs_vs_independent_construction": 3.814697265625e-06
+     }
+    },
+    "gauge_10": {
+     "R2": 0.9999638097255796,
+     "SSIM": 0.9999401987794099,
+     "Pearson": 0.9999118466519895,
+     "NRMSE": 8.925371377466995e-05,
+     "MSE": 3.810490773274386e-05,
+     "MAE": 0.005893203244067977,
+     "R2_v1": 0.9999638097181476,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 42.58460235595703,
+     "seconds": 0.08020901679992676,
+     "notes": {
+      "max_abs_diff_inputs_vs_independent_construction": 3.814697265625e-06
+     }
+    },
+    "new_s1": {
+     "R2": 0.9999585803314484,
+     "SSIM": 0.9999111838176369,
+     "Pearson": 0.9999657888469156,
+     "NRMSE": 0.000110895804417632,
+     "MSE": 4.0390279273696445e-05,
+     "MAE": 0.006090436997700872,
+     "R2_v1": 0.9999585803237383,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 31.057905197143555,
+     "seconds": 0.08140397071838379
+    },
+    "aniso_s1": {
+     "R2": 0.999950501542016,
+     "SSIM": 0.999931692605386,
+     "Pearson": 0.9998724469016026,
+     "NRMSE": 0.00010143798054971056,
+     "MSE": 4.7115854368886773e-05,
+     "MAE": 0.006253355739750472,
+     "R2_v1": 0.9999505015403184,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 44.343284606933594,
+     "seconds": 0.08119654655456543
+    },
+    "new_s2": {
+     "R2": 0.9999448963407341,
+     "SSIM": 0.9999532815685863,
+     "Pearson": 0.9999577457609001,
+     "NRMSE": 8.69502600149359e-05,
+     "MSE": 5.3261822957375515e-05,
+     "MAE": 0.0061690649851771995,
+     "R2_v1": 0.9999448963261636,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 60.41908645629883,
+     "seconds": 0.08107447624206543
+    },
+    "aniso_s2": {
+     "R2": 0.9999484696607173,
+     "SSIM": 0.9999539192579934,
+     "Pearson": 0.9999450789017006,
+     "NRMSE": 8.326467301017032e-05,
+     "MSE": 4.884229257929073e-05,
+     "MAE": 0.006148648855500121,
+     "R2_v1": 0.9999484696559513,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 60.48350524902344,
+     "seconds": 0.0812833309173584
+    },
+    "new_s3": {
+     "R2": 0.999961737576322,
+     "SSIM": 0.9999161717599164,
+     "Pearson": 0.9998944257279603,
+     "NRMSE": 0.0001085988852640042,
+     "MSE": 4.167718878699999e-05,
+     "MAE": 0.0061419891786652836,
+     "R2_v1": 0.9999617375820027,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 35.4871826171875,
+     "seconds": 0.0814363956451416
+    },
+    "aniso_s3": {
+     "R2": 0.9999506234474149,
+     "SSIM": 0.9999165531105618,
+     "Pearson": 0.9998119038814288,
+     "NRMSE": 0.00011912682831590184,
+     "MSE": 5.1887740358197485e-05,
+     "MAE": 0.006305705994746847,
+     "R2_v1": 0.999950623443997,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 37.834102630615234,
+     "seconds": 0.08128857612609863
+    },
+    "graded": {
+     "R2": 0.9999530420449146,
+     "SSIM": 0.9999293315253173,
+     "Pearson": 0.9998125005021348,
+     "NRMSE": 0.00010597428075050719,
+     "MSE": 5.060069323957849e-05,
+     "MAE": 0.00629557983177596,
+     "R2_v1": 0.9999530420429014,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 40.95143127441406,
+     "seconds": 0.08201932907104492
+    }
+   },
+   "recomputed_test100": {
+    "R2": 0.9999638096476061,
+    "SSIM": 0.9999401987886407,
+    "Pearson": 0.9999118328920793,
+    "NRMSE": 8.925380996362913e-05,
+    "MSE": 3.8104989831368745e-05,
+    "MAE": 0.005893205548718614,
+    "R2_v1": 0.9999638096400868,
+    "N": 100
+   },
+   "reproduction_abs_diff": {
+    "R2": 0.0,
+    "SSIM": 0.0,
+    "Pearson": 0.0,
+    "NRMSE": 0.0
+   },
+   "reproduction_max_abs_diff": 0.0,
+   "repeat_abs_diff": 1.1102230246251565e-16,
+   "seconds": 3.720186710357666,
+   "frozen_units": {
+    "task": "T6",
+    "model": "rhmp",
+    "params": 72920,
+    "train_gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+    "stats_rel_diff_loaded_vs_saved": 0.0,
+    "target_protocol": null,
+    "eval_batch": 64,
+    "stored_test100": {
+     "R2": 0.9999638096476061,
+     "SSIM": 0.9999401987886407,
+     "Pearson": 0.9999118328920793,
+     "NRMSE": 8.925380996362913e-05,
+     "MSE": 3.8104989831368745e-05,
+     "MAE": 0.005893205548718614,
+     "R2_v1": 0.9999638096400868,
+     "N": 100
+    },
+    "conditions": {
+     "orig": {
+      "R2": 0.9999638096476061,
+      "SSIM": 0.9999401987886407,
+      "Pearson": 0.9999118328920793,
+      "NRMSE": 8.925380996362913e-05,
+      "MSE": 3.8104989831368745e-05,
+      "MAE": 0.005893205548718614,
+      "R2_v1": 0.9999638096400868,
+      "N": 100,
+      "finite": true
+     },
+     "orig_regen": {
+      "R2": 0.9999638096498391,
+      "SSIM": 0.9999401987923324,
+      "Pearson": 0.999911832892592,
+      "NRMSE": 8.92538070781169e-05,
+      "MSE": 3.810498736765291e-05,
+      "MAE": 0.005893205479374191,
+      "R2_v1": 0.9999638096423429,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 42.58460235595703,
+      "seconds": 0.08159327507019043
+     },
+     "new": {
+      "R2": 0.9996235862801935,
+      "SSIM": 0.9998432149216719,
+      "Pearson": 0.9995544666434262,
+      "NRMSE": 0.0003415319888326575,
+      "MSE": 0.00037731309969218793,
+      "MAE": 0.007338926585484517,
+      "R2_v1": 0.9996235862663495,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 31.470287322998047,
+      "seconds": 0.08212447166442871
+     },
+     "aniso": {
+      "R2": 0.9999493943024069,
+      "SSIM": 0.9999303975322309,
+      "Pearson": 0.9998262419316533,
+      "NRMSE": 0.00010444360075245066,
+      "MSE": 4.962791496100769e-05,
+      "MAE": 0.006280421209176736,
+      "R2_v1": 0.9999493943090068,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 38.60685348510742,
+      "seconds": 0.08215641975402832
+     },
+     "fine": {
+      "R2": 0.9993355820758877,
+      "SSIM": 0.9998596886907203,
+      "Pearson": 0.9955911338200867,
+      "NRMSE": 0.0001377367435149681,
+      "MSE": 5.0340415702812053e-05,
+      "MAE": 0.006287356759954473,
+      "R2_v1": 0.9993355820828845,
+      "N": 100,
+      "eval_batch_used": 8,
+      "finite": true,
+      "max_abs_pred_normalised": 29.7590274810791,
+      "seconds": 2.1886794567108154
+     },
+     "gauge_0.1": {
+      "R2": 0.9999638096108305,
+      "SSIM": 0.9999401987668072,
+      "Pearson": 0.9999118324643711,
+      "NRMSE": 8.925385519814335e-05,
+      "MSE": 3.8105028552639814e-05,
+      "MAE": 0.005893207014024043,
+      "R2_v1": 0.9999638096034084,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 42.58460235595703,
+      "seconds": 0.08041834831237793,
+      "notes": {
+       "max_abs_diff_inputs_vs_independent_construction": 3.814697265625e-06
+      }
+     },
+     "gauge_1": {
+      "R2": 0.999963809638688,
+      "SSIM": 0.9999401987810072,
+      "Pearson": 0.9999118322077756,
+      "NRMSE": 8.925382088252708e-05,
+      "MSE": 3.810499922131554e-05,
+      "MAE": 0.005893204897521081,
+      "R2_v1": 0.9999638096312353,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 42.58460235595703,
+      "seconds": 0.08033204078674316,
+      "notes": {
+       "max_abs_diff_inputs_vs_independent_construction": 3.814697265625e-06
+      }
+     },
+     "gauge_10": {
+      "R2": 0.9999638097255796,
+      "SSIM": 0.9999401987794099,
+      "Pearson": 0.9999118466519895,
+      "NRMSE": 8.925371377466995e-05,
+      "MSE": 3.810490773274386e-05,
+      "MAE": 0.005893203244067977,
+      "R2_v1": 0.9999638097181476,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 42.58460235595703,
+      "seconds": 0.08017587661743164,
+      "notes": {
+       "max_abs_diff_inputs_vs_independent_construction": 3.814697265625e-06
+      }
+     },
+     "new_s1": {
+      "R2": 0.9999592980790905,
+      "SSIM": 0.9999113373820231,
+      "Pearson": 0.9999718334973813,
+      "NRMSE": 0.00010993076147467487,
+      "MSE": 3.969036957562561e-05,
+      "MAE": 0.00607802437216123,
+      "R2_v1": 0.9999592980710221,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 31.0767822265625,
+      "seconds": 0.08196473121643066
+     },
+     "aniso_s1": {
+      "R2": 0.9999533792911705,
+      "SSIM": 0.9999323438533542,
+      "Pearson": 0.999898802556976,
+      "NRMSE": 9.844511229572979e-05,
+      "MSE": 4.4376625399088924e-05,
+      "MAE": 0.006190228977000584,
+      "R2_v1": 0.9999533792888472,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 44.362525939941406,
+      "seconds": 0.08188033103942871
+     },
+     "new_s2": {
+      "R2": 0.9997953889144955,
+      "SSIM": 0.9999347846590732,
+      "Pearson": 0.9997429765163888,
+      "NRMSE": 0.000167550284892245,
+      "MSE": 0.00019777197297694485,
+      "MAE": 0.006940488607948229,
+      "R2_v1": 0.9997953889102632,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 60.47182083129883,
+      "seconds": 0.08205246925354004
+     },
+     "aniso_s2": {
+      "R2": 0.9999468444336067,
+      "SSIM": 0.999953796451146,
+      "Pearson": 0.9999358981551733,
+      "NRMSE": 8.456751491858004e-05,
+      "MSE": 5.0382740772396304e-05,
+      "MAE": 0.006168331875714177,
+      "R2_v1": 0.9999468444261134,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 60.441925048828125,
+      "seconds": 0.08209753036499023
+     },
+     "new_s3": {
+      "R2": 0.999956150111906,
+      "SSIM": 0.9999152362203421,
+      "Pearson": 0.9998593389498888,
+      "NRMSE": 0.00011625815112165094,
+      "MSE": 4.776331159170149e-05,
+      "MAE": 0.006226431053343032,
+      "R2_v1": 0.9999561501080668,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 35.47609329223633,
+      "seconds": 0.08211326599121094
+     },
+     "aniso_s3": {
+      "R2": 0.9999561252747708,
+      "SSIM": 0.9999174050686215,
+      "Pearson": 0.9998604126953278,
+      "NRMSE": 0.00011229397161409197,
+      "MSE": 4.610610161685691e-05,
+      "MAE": 0.006207624614934087,
+      "R2_v1": 0.9999561252625604,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 37.83939743041992,
+      "seconds": 0.08205127716064453
+     },
+     "graded": {
+      "R2": 0.9999538957786405,
+      "SSIM": 0.999929657859279,
+      "Pearson": 0.9997164971795452,
+      "NRMSE": 0.00010500650880782708,
+      "MSE": 4.9680731578331164e-05,
+      "MAE": 0.00633471430897429,
+      "R2_v1": 0.9999538957760925,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 40.95639419555664,
+      "seconds": 0.08253192901611328
+     }
+    },
+    "recomputed_test100": {
+     "R2": 0.9999638096476061,
+     "SSIM": 0.9999401987886407,
+     "Pearson": 0.9999118328920791,
+     "NRMSE": 8.925380996362913e-05,
+     "MSE": 3.8104989831368745e-05,
+     "MAE": 0.005893205548718614,
+     "R2_v1": 0.9999638096400868,
+     "N": 100
+    },
+    "reproduction_abs_diff": {
+     "R2": 0.0,
+     "SSIM": 0.0,
+     "Pearson": 2.220446049250313e-16,
+     "NRMSE": 0.0
+    },
+    "reproduction_max_abs_diff": 2.220446049250313e-16,
+    "repeat_abs_diff": 2.220446049250313e-16,
+    "seconds": 3.6149849891662598
+   },
+   "frozen_auto": {
+    "task": "T6",
+    "model": "rhmp",
+    "params": 72920,
+    "train_gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+    "stats_rel_diff_loaded_vs_saved": 0.0,
+    "target_protocol": null,
+    "eval_batch": 64,
+    "stored_test100": {
+     "R2": 0.9999638096476061,
+     "SSIM": 0.9999401987886407,
+     "Pearson": 0.9999118328920793,
+     "NRMSE": 8.925380996362913e-05,
+     "MSE": 3.8104989831368745e-05,
+     "MAE": 0.005893205548718614,
+     "R2_v1": 0.9999638096400868,
+     "N": 100
+    },
+    "conditions": {
+     "orig": {
+      "R2": 0.9999638096476061,
+      "SSIM": 0.9999401987886407,
+      "Pearson": 0.9999118328920793,
+      "NRMSE": 8.925380996362913e-05,
+      "MSE": 3.8104989831368745e-05,
+      "MAE": 0.005893205548718614,
+      "R2_v1": 0.9999638096400868,
+      "N": 100,
+      "finite": true
+     },
+     "orig_regen": {
+      "R2": 0.9999638096498391,
+      "SSIM": 0.9999401987923324,
+      "Pearson": 0.999911832892592,
+      "NRMSE": 8.92538070781169e-05,
+      "MSE": 3.810498736765291e-05,
+      "MAE": 0.005893205479374191,
+      "R2_v1": 0.9999638096423429,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 42.58460235595703,
+      "seconds": 0.08166623115539551
+     },
+     "new": {
+      "R2": 0.9996235862801935,
+      "SSIM": 0.9998432149216719,
+      "Pearson": 0.9995544666434261,
+      "NRMSE": 0.0003415319888326575,
+      "MSE": 0.00037731309969218793,
+      "MAE": 0.007338926585484517,
+      "R2_v1": 0.9996235862663495,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 31.470287322998047,
+      "seconds": 0.08214926719665527
+     },
+     "aniso": {
+      "R2": 0.9999493943024069,
+      "SSIM": 0.999930397532231,
+      "Pearson": 0.9998262419316533,
+      "NRMSE": 0.00010444360075245066,
+      "MSE": 4.962791496100769e-05,
+      "MAE": 0.006280421209176736,
+      "R2_v1": 0.9999493943090068,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 38.60685348510742,
+      "seconds": 0.08219361305236816
+     },
+     "fine": {
+      "R2": 0.9993355820758877,
+      "SSIM": 0.9998596886907203,
+      "Pearson": 0.9955911338200868,
+      "NRMSE": 0.0001377367435149681,
+      "MSE": 5.0340415702812053e-05,
+      "MAE": 0.006287356759954473,
+      "R2_v1": 0.9993355820828845,
+      "N": 100,
+      "eval_batch_used": 8,
+      "finite": true,
+      "max_abs_pred_normalised": 29.7590274810791,
+      "seconds": 2.1876649856567383
+     },
+     "gauge_0.1": {
+      "R2": 0.9999638096108305,
+      "SSIM": 0.999940198766807,
+      "Pearson": 0.9999118324643712,
+      "NRMSE": 8.925385519814335e-05,
+      "MSE": 3.8105028552639814e-05,
+      "MAE": 0.005893207014024043,
+      "R2_v1": 0.9999638096034084,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 42.58460235595703,
+      "seconds": 0.08034515380859375,
+      "notes": {
+       "max_abs_diff_inputs_vs_independent_construction": 3.814697265625e-06
+      }
+     },
+     "gauge_1": {
+      "R2": 0.999963809638688,
+      "SSIM": 0.9999401987810069,
+      "Pearson": 0.9999118322077751,
+      "NRMSE": 8.925382088252708e-05,
+      "MSE": 3.810499922131554e-05,
+      "MAE": 0.005893204897521081,
+      "R2_v1": 0.9999638096312353,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 42.58460235595703,
+      "seconds": 0.08020305633544922,
+      "notes": {
+       "max_abs_diff_inputs_vs_independent_construction": 3.814697265625e-06
+      }
+     },
+     "gauge_10": {
+      "R2": 0.9999638097255796,
+      "SSIM": 0.9999401987794099,
+      "Pearson": 0.9999118466519895,
+      "NRMSE": 8.925371377466995e-05,
+      "MSE": 3.810490773274386e-05,
+      "MAE": 0.005893203244067977,
+      "R2_v1": 0.9999638097181476,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 42.58460235595703,
+      "seconds": 0.0804593563079834,
+      "notes": {
+       "max_abs_diff_inputs_vs_independent_construction": 3.814697265625e-06
+      }
+     },
+     "new_s1": {
+      "R2": 0.9999592980790905,
+      "SSIM": 0.9999113373820231,
+      "Pearson": 0.9999718334973814,
+      "NRMSE": 0.00010993076147467487,
+      "MSE": 3.969036957562561e-05,
+      "MAE": 0.00607802437216123,
+      "R2_v1": 0.9999592980710221,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 31.0767822265625,
+      "seconds": 0.08296751976013184
+     },
+     "aniso_s1": {
+      "R2": 0.9999533792911705,
+      "SSIM": 0.9999323438533543,
+      "Pearson": 0.9998988025569762,
+      "NRMSE": 9.844511229572979e-05,
+      "MSE": 4.4376625399088924e-05,
+      "MAE": 0.006190228977000584,
+      "R2_v1": 0.9999533792888472,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 44.362525939941406,
+      "seconds": 0.08199357986450195
+     },
+     "new_s2": {
+      "R2": 0.9997953889144955,
+      "SSIM": 0.9999347846590732,
+      "Pearson": 0.9997429765163891,
+      "NRMSE": 0.000167550284892245,
+      "MSE": 0.00019777197297694485,
+      "MAE": 0.006940488607948229,
+      "R2_v1": 0.9997953889102632,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 60.47182083129883,
+      "seconds": 0.08186674118041992
+     },
+     "aniso_s2": {
+      "R2": 0.9999468444336067,
+      "SSIM": 0.999953796451146,
+      "Pearson": 0.9999358981551734,
+      "NRMSE": 8.456751491858004e-05,
+      "MSE": 5.0382740772396304e-05,
+      "MAE": 0.006168331875714177,
+      "R2_v1": 0.9999468444261134,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 60.441925048828125,
+      "seconds": 0.08192157745361328
+     },
+     "new_s3": {
+      "R2": 0.999956150111906,
+      "SSIM": 0.9999152362203421,
+      "Pearson": 0.9998593389498889,
+      "NRMSE": 0.00011625815112165094,
+      "MSE": 4.776331159170149e-05,
+      "MAE": 0.006226431053343032,
+      "R2_v1": 0.9999561501080668,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 35.47609329223633,
+      "seconds": 0.08206987380981445
+     },
+     "aniso_s3": {
+      "R2": 0.9999561252747708,
+      "SSIM": 0.9999174050686215,
+      "Pearson": 0.9998604126953279,
+      "NRMSE": 0.00011229397161409197,
+      "MSE": 4.610610161685691e-05,
+      "MAE": 0.006207624614934087,
+      "R2_v1": 0.9999561252625604,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 37.83939743041992,
+      "seconds": 0.08198928833007812
+     },
+     "graded": {
+      "R2": 0.9999538957786405,
+      "SSIM": 0.999929657859279,
+      "Pearson": 0.999716497179545,
+      "NRMSE": 0.00010500650880782708,
+      "MSE": 4.9680731578331164e-05,
+      "MAE": 0.00633471430897429,
+      "R2_v1": 0.9999538957760925,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 40.95639419555664,
+      "seconds": 0.08270263671875
+     }
+    },
+    "recomputed_test100": {
+     "R2": 0.9999638096476061,
+     "SSIM": 0.9999401987886407,
+     "Pearson": 0.9999118328920793,
+     "NRMSE": 8.925380996362913e-05,
+     "MSE": 3.8104989831368745e-05,
+     "MAE": 0.005893205548718614,
+     "R2_v1": 0.9999638096400868,
+     "N": 100
+    },
+    "reproduction_abs_diff": {
+     "R2": 0.0,
+     "SSIM": 0.0,
+     "Pearson": 0.0,
+     "NRMSE": 0.0
+    },
+    "reproduction_max_abs_diff": 0.0,
+    "repeat_abs_diff": 2.220446049250313e-16,
+    "seconds": 3.6155471801757812
+   }
+  }
+ },
+ "rms_theta_training": 0.2891596555709839,
+ "seconds": 12.461059331893921
+}

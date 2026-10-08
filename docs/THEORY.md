@@ -2,7 +2,7 @@
 
 These notes state precisely what the RHMP v2 operator family can represent, what is identifiable from data, and why
 models of the general stack (the nonlinear message-passing network) learn accurate solvers whose metrics are *not*
-the material (measured in [../REPORT.md](../REPORT.md) §1.4 and §6.3). They motivate the material-identification
+the material. They motivate the material-identification
 features (`material_dims`, `layer_type='solve'`, the operator-identification loss).
 
 Notation: complex `K` with coboundaries `d_k`, reference diagonal Hodge stars `star_k > 0`, learned metrics `H_k`
@@ -62,8 +62,8 @@ un-normalised operator (with `H = star exp(ref) exp(phi)`), or a separate scalar
    feature route, and `H` is free to serve another purpose.
 2. **Polynomial layers prefer preconditioners.** A layer `sum_p c_p L_hat^p x` approximates the *inverse* operator.
    For a degree-`P` polynomial the best diagonal metric is closer to a Jacobi-type preconditioner (`h ~ 1/sigma`) than
-   to `sigma`, which is the sign observed (e.g. face `r = -0.73` in the last layer of a full-tensor polynomial run,
-   `results/RESULTS.md` §4).
+   to `sigma`, which is the sign observed (e.g. face `r = -0.73` in the last layer of a full-tensor polynomial run
+   on heterogeneous Poisson, `scripts/metric_recovery.py`).
 3. **No layer solves.** Even the resolvent layer `(I + tau L_hat)^{-1}` sits between nonlinear gates and a
    128-channel lifting that can absorb `sigma` elsewhere.
 

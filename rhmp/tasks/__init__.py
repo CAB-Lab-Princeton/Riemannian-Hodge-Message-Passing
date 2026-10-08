@@ -8,10 +8,37 @@ name    content (legacy = v1 exact inputs/outputs;  native = cochain inputs/outp
 T1      CNS vorticity, 32x32 grid (triangulated). legacy: (rho,Vx,Vy,p) at nodes. native: (rho,p) at nodes +
         velocity 1-form on edges ``V_e = (V_s+V_d)/2 . (x_d-x_s)``.  target: vorticity at nodes.
 T1q     T1 on the quad CW complex ``CochainComplex.from_grid(cell='quad')`` (same data, node order matched).
-T2      torus advection-diffusion, scalar -> scalar at nodes (legacy == native).
+T1qe    T1q with an additional even edge column (half-difference of the endpoint velocities along the edge).
+T1qn    T1qe with the oriented face circulation as an even face input and a vertex readout (no output map).
+T1p     T1 on its periodic grid (flat torus ``from_grid((32, 32), 1/32, periodic=True)``; the simulation and the
+        target stencil are periodic).  native: periodic quads with the T1qe inputs (wrap-around edges included,
+        minimal-image edge vectors).  legacy: v1 node inputs on the periodic triangulated grid (baselines).
+T1pm    native T1p + log rho and log p averaged to edges and faces as even columns (seen by the metric heads).
+T1pml   T1pm + (log rho, log p) as additional vertex inputs.
+T1pf    T1p (T1pmf: T1pm, T1pmlf: T1pml) on the same trajectories coarse-grained by 4 x 4 block averages instead of
+        strided subsampling (``datasets/v2/T1_cns_vorticity_blockavg.pkl``; aliasing analysis).
+T1g     T1 on a graded, anisotropic periodic 32x32 grid (nodes = a non-uniform subset of the 128x128 simulation grid,
+        spacings 1-8 fine cells, aspect ratios 1/8-8; ``datasets/v2/T1_cns_vorticity_graded.pkl``); target = the
+        fine-grid (spectral) vorticity at t+1 at the nodes.  native: T1p inputs on periodic quads, patch-area
+        normalised oriented face->node map; legacy: node inputs on the triangulated grid.  ``extra_tests``: zero-shot
+        grids U32, G2, U64, G1rot (100 paper-evaluation samples each).  T1gml: T1pml inputs (legacy: + vertex logs);
+        T1gml_mean: T1gml with the plain oriented face->node mean (native only); T1gmla: T1gml with the scale-dependent
+        geometry descriptors in one fixed length unit instead of relative to each mesh's median (native only).
+T2      torus advection-diffusion, scalar -> scalar at nodes (legacy == native).  The velocity, drawn anew for
+        every sample by the generator, is not an input: the target is not a function of the input.
+T2v     T2 with the velocity as an input (same mesh, samples, targets; ``datasets/v2/T2v.pt`` from
+        ``gen_T2v.py``).  native: f at nodes + velocity one-form (odd) and half-difference (even) on edges.
+        legacy: (f, Vx, Vy, Vz) at nodes.
+T2a     anisotropic transport on the T2 torus (``rhmp/tasks/torus.py``, ``gen_T2a.py``): divergence-free velocity,
+        field-aligned diffusion along helical field lines, ratio 1..100, accurate conservative reference.  native: f;
+        edge velocity one-form + half-difference + cos^2(t_e, b) + log t_e^T D t_e; face log D_par, log D_perp.
+        legacy: (f, Vx, Vy, Vz, bx, by, bz, log D_par, log D_perp) at nodes.
 T3      ellipsoid coexact flow psi -> v = n x grad psi.  node_vector readout in both modes; legacy keeps the v1
         per-component target normalisation (and v1-style ``direct`` vector readout), native uses isotropic scaling
         (E(n)-consistent) and the least-squares readout.
+T3g     T3 with the exact structure of its targets: readout ``grad`` (predict a stream function phi, w = d0 phi on
+        edges) + the fixed edge->vertex map of the generator (P1 face gradients averaged to the vertices, v = n x g).
+        Native only.
 T5      Maxwell/Poisson rho -> E.  legacy: 2 node scalars (v1). native: node_vector (``direct`` readout = the
         generator's definition E_i = mean_e E_e t_e), isotropic target scaling.
 T5g     T5 with the exact structure of its targets: readout ``grad`` (predict a potential phi, E_e = d0 phi on
@@ -44,6 +71,17 @@ _cons, _cons_mass), HP_qual_graded / HP_qual_sliver (+ _ref) and the anisotropy 
 (AHP, ASURF, ACURL, ADARCY) resolve through ``load_task`` as well (hook below; the paper tasks do not depend on those
 modules).
 
+AirfRANS tasks (``rhmp/tasks/airfrans.py``, generator ``datasets/generators/gen_airfrans.py``): T8 resolution views
+``T8_n500`` / ``T8_n2000`` / ``T8_n8000`` (test only), T8 with the chord frame (``T8fr``, ``T8xy``, ``T8frxy``) and the
+tasks on conforming near-field meshes (``AFV``, ``AFVp``, ``AFU``, ``AFUv``, ``AFD``, ...) resolve through the same hook.
+
+Maxwell tasks (``rhmp/tasks/maxwell.py``, generator ``datasets/generators/gen_maxwell.py``): ``MXS``, nonlinear
+magnetostatics of an EI-core electromagnet with saturable steel on one fixed mesh (vertex field B from currents and
+material phases), ``MXA``, its anisotropic version (grain-oriented / laminated steel with rolling directions, several
+layout families, a held-out family; generator ``gen_maxwell_aniso.py``; ablation ``MXA_noorient``), and ``MXE``,
+linear electrostatics of an electrical capacitance tomography sensor (vertex field E from electrode potentials, space
+charge and material phases).
+
 Synthetic tasks (``datasets/v2/*.pt``, generators in ``datasets/generators/gen_*.py``), variable meshes:
 
 * ``HP[<target>][_k<kappa>][_aniso[<R>]]`` (default kappa=100): 2-D hetero(-anisotropic) Poisson on variable meshes.
@@ -71,8 +109,23 @@ __all__ = ["TaskData", "Stats", "load_task", "list_tasks", "task_defaults", "TAS
 TASK_DEFAULTS: dict[str, dict] = {
     "T1": dict(C=128, layers=4, batch=64),
     "T1q": dict(C=128, layers=4, batch=64),
+    "T1qe": dict(C=128, layers=4, batch=64),
+    "T1qn": dict(C=128, layers=4, batch=64),
+    "T1p": dict(C=128, layers=4, batch=64),
+    "T1pm": dict(C=128, layers=4, batch=64),
+    "T1pml": dict(C=128, layers=4, batch=64),
+    "T1pf": dict(C=128, layers=4, batch=64),
+    "T1pmf": dict(C=128, layers=4, batch=64),
+    "T1pmlf": dict(C=128, layers=4, batch=64),
+    "T1g": dict(C=128, layers=4, batch=64),
+    "T1gml": dict(C=128, layers=4, batch=64),
+    "T1gml_mean": dict(C=128, layers=4, batch=64),
+    "T1gmla": dict(C=128, layers=4, batch=64),
     "T2": dict(C=64, layers=4, batch=64),
+    "T2v": dict(C=64, layers=4, batch=64),
+    "T2a": dict(C=64, layers=4, batch=64),
     "T3": dict(C=64, layers=4, batch=64),
+    "T3g": dict(C=64, layers=4, batch=64),
     "T5": dict(C=160, layers=4, batch=64),
     "T5g": dict(C=160, layers=4, batch=64),
     "T6": dict(C=128, layers=4, batch=64),
@@ -88,7 +141,9 @@ TASK_DEFAULTS: dict[str, dict] = {
 
 _HP_RE = re.compile(r"^HP(flux|fluxd|fluxfem|grad)?(?:_k(\d+))?(?:_aniso(\d*))?$")
 _TET_RE = re.compile(r"^TET(flux|fluxd|fluxfem|grad)?(?:_k(\d+))?$")
-_PAPER = ("T1", "T1q", "T2", "T3", "T5", "T5g", "T6", "T6f", "T7", "T7f", "T8", "T8v", "T6_100K")
+_PAPER = ("T1", "T1q", "T1qe", "T1qn", "T1p", "T1pm", "T1pml", "T1pf", "T1pmf", "T1pmlf", "T1g", "T1gml",
+          "T1gml_mean", "T1gmla", "T2", "T2v", "T2a", "T3", "T3g", "T5", "T5g", "T6", "T6f", "T7", "T7f", "T8", "T8v",
+          "T6_100K")
 
 
 def _accepts(fn, kwarg: str) -> bool:
@@ -111,11 +166,36 @@ def _suite():
     return SUITE_TASKS, suite_task_defaults
 
 
+def _airfrans():
+    """The AirfRANS task registry ``rhmp.tasks.airfrans`` as ``(AIRFRANS_TASKS, airfrans_task_defaults)``, or
+    ``(None, None)`` when it fails to import (the built-in tasks never depend on it)."""
+    try:
+        from rhmp.tasks.airfrans import AIRFRANS_TASKS, airfrans_task_defaults
+    except Exception:  # noqa: BLE001 - a broken optional module must not break the other tasks
+        return None, None
+    return AIRFRANS_TASKS, airfrans_task_defaults
+
+
+def _maxwell():
+    """The Maxwell task registry ``rhmp.tasks.maxwell`` (MXS, MXA, MXE) as ``(MXS_TASKS, mxs_task_defaults)``, or
+    ``(None, None)`` when it fails to import (the built-in tasks never depend on it)."""
+    try:
+        from rhmp.tasks.maxwell import MXS_TASKS, mxs_task_defaults
+    except Exception:  # noqa: BLE001 - a broken optional module must not break the other tasks
+        return None, None
+    return MXS_TASKS, mxs_task_defaults
+
+
 def list_tasks() -> list[str]:
     """Canonical task names (HP/TET accept further ``_k<kappa>`` / ``_aniso`` suffixes; extension-suite names
-    (SURF*, DYN*, HP_qual_*, anisotropy tasks) are appended when ``rhmp.tasks.suite`` is importable)."""
+    (SURF*, DYN*, HP_qual_*, anisotropy tasks) and the AirfRANS tasks (``rhmp.tasks.airfrans``) are appended when
+    their modules are importable)."""
     suite, _ = _suite()
     extra = sorted(suite) if suite else []
+    af, _ = _airfrans()
+    extra += list(af) if af else []
+    mx, _ = _maxwell()
+    extra += list(mx) if mx else []
     return list(_PAPER) + ["HP", "HPflux", "HPfluxd", "HPfluxfem", "HPgrad", "HP_aniso10", "HP_aniso100",
                            "HPflux_aniso100", "HP_k10", "HP_k1000", "TET", "TETflux", "TETfluxfem", "TETgrad"] + extra
 
@@ -131,6 +211,12 @@ def task_defaults(name: str) -> dict:
     suite, suite_defaults = _suite()
     if suite and name in suite:
         return suite_defaults(name)
+    af, af_defaults = _airfrans()
+    if af and name in af:
+        return af_defaults(name)
+    mx, mx_defaults = _maxwell()
+    if mx and name in mx:
+        return mx_defaults(name)
     raise KeyError(f"unknown task {name!r}; known: {list_tasks()}")
 
 
@@ -206,4 +292,10 @@ def _load(name: str, root, *, native: bool, device, star: str, **kw) -> TaskData
             from rhmp.data import strip_whitney
             strip_whitney(td)
         return td
+    af, _ = _airfrans()                       # AirfRANS tasks (T8_n*, T8fr/T8xy/T8frxy, AFV*, AFU*, AFD)
+    if af and name in af:
+        return af[name](droot, native=native, device=device, star=star, **kw)
+    mx, _ = _maxwell()                        # Maxwell tasks (MXS, MXA, MXE)
+    if mx and name in mx:
+        return mx[name](droot, native=native, device=device, star=star, **kw)
     raise KeyError(f"unknown task {name!r}; known: {list_tasks()}")

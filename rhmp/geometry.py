@@ -4,7 +4,9 @@ Everything here is computed once per complex under ``torch.no_grad()`` in float6
 ``index_add``/``scatter_reduce``; no loops over cells) and cached on the complex as float32.
 Only intrinsic quantities (lengths, areas, volumes, angles) are used, so every output is invariant
 under rotations, reflections and translations of ``pos``.  Scale quantities enter the descriptors
-as ``log(x / median_x)`` with the median taken over *this* complex (mesh-transferable, DESIGN §3.1).
+as ``log(x / median_x)`` with the median taken over *this* complex (mesh-transferable, DESIGN §3.1);
+the log medians are returned as well (``geo_log_median``, columns :data:`GEO_RELATIVE_COLUMNS`), so that a
+model can re-express the descriptors in the units of its training mesh (``RHMPConfig.frozen_units``).
 
 Reference stars (DESIGN §3.1):
   * ``cotan``: ``star0`` barycentric dual area, ``star1 = sum_f w_fe`` with ``w_fe = cot(opposite
@@ -28,9 +30,12 @@ from torch import Tensor
 
 __all__ = [
     "GEO_FEATURE_NAMES",
+    "GEO_RELATIVE_COLUMNS",
     "STAR_TYPES",
     "KAPPA",
     "COT_CLAMP",
+    "min_image",
+    "local_cell_positions",
     "face_measures",
     "surface_geometry",
     "volume_geometry",
@@ -50,6 +55,8 @@ _TINY = 1e-300  # absolute guard against division by exact zero (degenerate inpu
 
 STAR_TYPES = ("cotan", "barycentric", "unit")
 
+# descriptor columns that are log(x / median over the complex) (the others are scale-free), per degree
+GEO_RELATIVE_COLUMNS: dict[int, tuple[int, ...]] = {0: (0, 1), 1: (0, 1), 2: (0, 1), 3: (0,)}
 GEO_FEATURE_NAMES: dict[int, tuple[str, ...]] = {
     # vertices: dual area (surfaces) / dual volume (tets); mean incident edge length; log #edges;
     # boundary flag; angle defect 2pi - sum(angles) (pi - sum at boundary vertices; 0 for tets)
@@ -93,6 +100,15 @@ def _log_rel(x: Tensor) -> Tensor:
     return torch.log(x.clamp_min(med * _LOG_FLOOR) / med)
 
 
+def _log_medians(cols: list, width: int, ref: Tensor) -> Tensor:
+    """``(width,)`` float64: ``log median`` of the quantity behind every relative (``_log_rel``) descriptor column of
+    :data:`GEO_RELATIVE_COLUMNS` (``cols``, in that order), 0 for the scale-free columns."""
+    out = torch.zeros(width, dtype=torch.float64, device=ref.device)
+    for j, x in enumerate(cols):
+        out[j] = torch.log(_median_pos(x).to(torch.float64))
+    return out
+
+
 def _scatter_add(n: int, index: Tensor, src: Tensor) -> Tensor:
     return src.new_zeros((n,) + tuple(src.shape[1:])).index_add_(0, index, src)
 
@@ -104,6 +120,43 @@ def _scatter_any(n: int, index: Tensor, flag: Tensor) -> Tensor:
 def _check_star(star: str, allowed: tuple[str, ...]) -> None:
     if star not in allowed:
         raise ValueError(f"unknown/unsupported star type {star!r}; expected one of {allowed}")
+
+
+def min_image(d: Tensor, period) -> Tensor:
+    """Minimal-image representative of position differences on a flat torus with axis-aligned periods.
+
+    Args:
+        d: ``(..., D)`` differences of vertex positions.
+        period: ``(L_1, .., L_P)`` with ``P <= D`` (axes ``P..D-1`` are not periodic).
+    Returns:
+        ``(..., D)``: ``d_i - L_i round(d_i / L_i)`` on the periodic axes (each in ``[-L_i/2, L_i/2]``), ``d_i``
+        elsewhere.
+    """
+    L = torch.as_tensor(tuple(float(v) for v in period), dtype=d.dtype, device=d.device)
+    P = L.numel()
+    if P > d.shape[-1]:
+        raise ValueError(f"period has {P} axes, positions have {d.shape[-1]}")
+    head = d[..., :P] - L * torch.round(d[..., :P] / L)
+    return torch.cat([head, d[..., P:]], dim=-1) if P < d.shape[-1] else head
+
+
+def local_cell_positions(P: Tensor, cells: Tensor, period=None) -> Tensor:
+    """Vertex positions of every cell, ``(n, m, D)``; on a periodic complex in the cell's own (unwrapped) frame.
+
+    Args:
+        P: ``(n0, D)`` positions.
+        cells: ``(n, m)`` vertex ids (``-1`` padded slots get the position of the first vertex).
+        period: ``None`` or the axis periods of a flat torus (see :func:`min_image`): the first vertex of each cell
+            is kept and the others are placed at their minimal images relative to it, so that every cell is a
+            contiguous polygon / simplex (intrinsic geometry of the torus).
+    Returns:
+        ``(n, m, D)`` in the dtype of ``P``.
+    """
+    C = torch.where(cells >= 0, cells, cells[:, :1].expand_as(cells))
+    X = P[C]
+    if period is None:
+        return X
+    return X[:, :1] + min_image(X - X[:, :1], period)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -195,6 +248,7 @@ def surface_geometry(
     corner: dict[str, Tensor],
     star: str = "cotan",
     kappa: float = KAPPA,
+    period=None,
 ) -> dict:
     """Stars, descriptors and boundary flags of a 2-complex (triangles and/or polygons).
 
@@ -205,10 +259,13 @@ def surface_geometry(
         edges: ``(n1, 2)`` int64 canonical edges (src < dst).
         corner: corner/half-edge table, each ``(H,)`` with ``H = sum(face_len)``: ``face``, ``v`` (corner
             vertex), ``next``, ``prev`` (neighbouring vertices in the face), ``edge`` (edge id of the
-            half-edge ``v -> next``), ``sign`` (+1 if ``v < next``), ``prev_idx`` (corner index of ``prev``
-            in the same face; for triangles this is the corner opposite the half-edge).
+            half-edge ``v -> next``), ``sign`` (+1 if ``v < next``), ``prev_idx`` / ``next_idx`` (corner index of
+            ``prev`` / ``next`` in the same face; for triangles ``prev`` is the corner opposite the half-edge).
         star: ``'cotan' | 'barycentric' | 'unit'``.
         kappa: cotan clamp factor.
+        period: ``None``, or the axis periods of a flat torus (periodic complex, see :func:`min_image`): edge
+            vectors are minimal images and every face is measured in its own unwrapped frame
+            (:func:`local_cell_positions`), so all quantities are the intrinsic ones of the torus.
     Returns:
         dict with ``star`` (3 tensors ``(n_k,)`` float32 > 0), ``geo`` (3 tensors ``(n_k, G_k)`` float32),
         ``boundary`` (3 bool tensors) and ``stats`` (python numbers).
@@ -220,15 +277,28 @@ def surface_geometry(
     cprev, csign = corner["prev_idx"], corner["sign"]
 
     e0, e1 = edges[:, 0], edges[:, 1]
-    ev = P[e1] - P[e0]
-    ell = ev.norm(dim=-1)
-    emid = 0.5 * (P[e0] + P[e1])
-
-    fb = _face_block(P, faces, face_len, corner, ell)
+    if period is None:
+        ev = P[e1] - P[e0]
+        ell = ev.norm(dim=-1)
+        emid = 0.5 * (P[e0] + P[e1])
+        fb = _face_block(P, faces, face_len, corner, ell)
+        emid_c = emid[ce]                                       # midpoint of the half-edge of every corner
+        Pv, Pn, Pp = P[cv], P[cn], P[cp]                        # corner, next and previous vertex positions
+    else:
+        ev = min_image(P[e1] - P[e0], period)
+        ell = ev.norm(dim=-1)
+        Pc = local_cell_positions(P, faces, period)[faces >= 0]   # (H, 3) corner positions, face-local frames
+        H = Pc.shape[0]
+        sid = torch.full_like(faces, -1)
+        sid[faces >= 0] = torch.arange(H, device=faces.device)  # corner ids in the corner-table order
+        csoup = dict(corner, v=torch.arange(H, device=faces.device), next=corner["next_idx"], prev=cprev)
+        fb = _face_block(Pc, sid, face_len, csoup, ell)
+        Pv, Pn, Pp = Pc, Pc[corner["next_idx"]], Pc[cprev]
+        emid_c = 0.5 * (Pv + Pn)
     area, centroid, theta, tri_c = fb["area"], fb["centroid"], fb["theta"], fb["tri_c"]
 
     # ---- per half-edge DEC weights
-    q = centroid[cf] - emid[ce]
+    q = centroid[cf] - emid_c
     bary_half = q.norm(dim=-1) / ell[ce].clamp_min(_TINY)
     sin_opp = fb["sin_u"][cprev].clamp_min(_SIN_FLOOR * fb["uw"][cprev] + _TINY)
     cot_half = torch.where(tri_c, 0.5 * fb["dot"][cprev] / sin_opp, bary_half)
@@ -245,7 +315,7 @@ def surface_geometry(
     valence = torch.bincount(e0, minlength=n0) + torch.bincount(e1, minlength=n0)
     isolated = valence == 0
     corner_area = torch.where(
-        tri_c, area[cf] / 3.0, 0.25 * _cross(centroid[cf] - P[cv], P[cn] - P[cp]).norm(dim=-1)
+        tri_c, area[cf] / 3.0, 0.25 * _cross(centroid[cf] - Pv, Pn - Pp).norm(dim=-1)
     )
     dual_area = _scatter_add(n0, cv, corner_area)
     dual_area = torch.where(isolated, _median_pos(dual_area), dual_area)
@@ -306,6 +376,8 @@ def surface_geometry(
     return dict(
         star=[s.to(f32) for s in (star0, star1, star2)],
         geo=[geo0, geo1, geo2],
+        geo_log_median=[_log_medians([dual_area, mean_len], geo0.shape[1], P),
+                        _log_medians([ell, star1], geo1.shape[1], P), _log_medians([area, star2], geo2.shape[1], P)],
         boundary=[bnd0, bnd1, bnd2],
         stats=stats,
     )
@@ -436,6 +508,9 @@ def volume_geometry(
     return dict(
         star=[s.to(f32) for s in (star0, star1, star2, star3)],
         geo=[geo0, geo1, geo2, geo3],
+        geo_log_median=[_log_medians([dual_vol, mean_len], geo0.shape[1], P),
+                        _log_medians([ell, star1], geo1.shape[1], P), _log_medians([f_area, star2], geo2.shape[1], P),
+                        _log_medians([vol], geo3.shape[1], P)],
         boundary=[bnd0, bnd1, bnd2, bnd3],
         stats=stats,
     )

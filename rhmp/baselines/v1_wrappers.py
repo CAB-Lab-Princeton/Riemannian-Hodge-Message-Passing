@@ -30,7 +30,7 @@ Deliberate deviations from v1 (all switchable, defaults = the stronger/fairer va
   val R2 -0.0004 after 100 epochs).
 * heads: v1 trained MPSN / SCCNN / Clifford-SMPN with a 1-channel edge readout on edge-averaged node targets
   ``0.5 (y_src + y_dst)`` and scored them in edge space (first target component only; v1 evaluation script
-  ``compute_all_metrics.py``).  On the v1 paper tasks this *v1 edge protocol* is the default
+  ``compute_all_metrics.py``).  On the original paper tasks this *v1 edge protocol* is the default
   (``head='v1_edge'``, the task target is transformed by ``rhmp.baselines.registry.prepare_task``); elsewhere, or
   with ``head='node'``, they predict the task target with the multi-degree ``ComplexHead``.
 * EGNN on legacy T7: v1 meant to strip the directional columns (``avg*dx, avg*dy``) but selected columns
@@ -211,8 +211,7 @@ class GaugeCNNCore(nn.Module):
 
     def forward(self, f0: Tensor, A: V1ComplexAdapter) -> dict[int, Tensor]:
         src, dst = A.edges[:, 0], A.edges[:, 1]
-        p2 = A.pos[:, :2]
-        ev = p2[dst] - p2[src]
+        ev = A.edge_vectors()[:, :2]                                          # minimal images on a periodic complex
         u = ev / ev.norm(dim=-1, keepdim=True).clamp(min=DIR_EPS)
         c, s = u[:, 0].view(-1, 1, 1), u[:, 1].view(-1, 1, 1)
         x = self.v1.encoder(f0)
@@ -236,12 +235,21 @@ class GEMCore(nn.Module):
 
     ``v1_exact=False`` (default): messages along both edge directions (reverse angle ``theta + pi``, reverse
     transport), mean over the undirected neighbourhood, SiLU between convolutions.  ``v1_exact=True``: v1 (canonical
-    ``src -> dst`` edges only, in-degree mean, linear)."""
+    ``src -> dst`` edges only, in-degree mean, linear).
 
-    def __init__(self, v1: nn.Module, v1_exact: bool = False) -> None:
+    ``radial=True`` (option, not v1): the kernels also depend on the edge length, every message of layer ``l`` is
+    scaled by ``1 + r_l(log |e|)`` (``r``: MLP 1 -> 16 -> L, last layer zero-initialised, i.e. GEM-CNN at
+    initialisation), so the network can adapt its stencils to the local spacing of graded meshes."""
+
+    def __init__(self, v1: nn.Module, v1_exact: bool = False, radial: bool = False) -> None:
         super().__init__()
         self.v1 = v1
         self.v1_exact = bool(v1_exact)
+        self.radial = None
+        if radial:
+            self.radial = nn.Sequential(nn.Linear(1, 16), nn.SiLU(), nn.Linear(16, v1.n_layers))
+            nn.init.zeros_(self.radial[2].weight)
+            nn.init.zeros_(self.radial[2].bias)
 
     def _basis(self, theta: Tensor) -> Tensor:
         return self.v1._compute_basis(theta, theta.device)                   # (E, nb)
@@ -257,8 +265,7 @@ class GEMCore(nn.Module):
 
     def forward(self, f0: Tensor, A: V1ComplexAdapter) -> dict[int, Tensor]:
         src, dst = A.edges[:, 0], A.edges[:, 1]
-        p2 = A.pos[:, :2]
-        ev = p2[dst] - p2[src]
+        ev = A.edge_vectors()[:, :2]                                          # minimal images on a periodic complex
         u = ev / ev.norm(dim=-1, keepdim=True).clamp(min=DIR_EPS)
         x = self.v1.encoder(f0)
         n = x.shape[0]
@@ -273,10 +280,18 @@ class GEMCore(nn.Module):
         c, s = uu[:, 0].view(-1, 1, 1), uu[:, 1].view(-1, 1, 1)
         cnt = cnt.clamp_min(1).to(x.dtype).view(-1, 1, 1)
         L = self.v1.n_layers
+        gain = None
+        if self.radial is not None:
+            ell = ev.norm(dim=-1).clamp(min=DIR_EPS)
+            ell = ell if self.v1_exact else torch.cat([ell, ell])
+            gain = 1.0 + self.radial(torch.log(ell).unsqueeze(-1).to(x.dtype))           # (E', L)
         for i in range(L):
             x_self = self.v1.K_self[i](x)
             x_t = _rotate_pairs(_gather(x, send), c.to(x.dtype), s.to(x.dtype))
-            agg = _scatter(self._conv(x_t, basis, self.v1.K_neigh_weights[i]), recv, n) / cnt
+            msg = self._conv(x_t, basis, self.v1.K_neigh_weights[i])
+            if gain is not None:
+                msg = msg * gain[:, i].view(-1, 1, 1)
+            agg = _scatter(msg, recv, n) / cnt
             x = x_self + agg + self.v1.bias[i]
             if not self.v1_exact and i < L - 1:
                 x = F.silu(x)
@@ -460,10 +475,13 @@ class FNOCore(nn.Module):
         self.grid = (int(grid[0]), int(grid[1]))
 
     def forward(self, f0: Tensor, A: V1ComplexAdapter) -> Tensor:
-        if A.num_graphs != 1 or A.n0 != self.grid[0] * self.grid[1]:
-            raise ValueError(f"FNO needs the {self.grid} grid it was built for (got n0={A.n0}, "
+        grid = self.grid
+        if A.num_graphs == 1 and A.n0 != grid[0] * grid[1]:     # another regular grid (zero-shot resolution change)
+            grid = A.grid_shape() or grid
+        if A.num_graphs != 1 or A.n0 != grid[0] * grid[1]:
+            raise ValueError(f"FNO needs a regular grid (built for {self.grid}; got n0={A.n0}, "
                              f"{A.num_graphs} meshes)")
-        y = self.v1.fno(f0.transpose(0, 1), self.grid)                         # (B, n0, O)
+        y = self.v1.fno(f0.transpose(0, 1), grid)                              # (B, n0, O)
         return y.transpose(0, 1).contiguous()
 
 
@@ -582,7 +600,7 @@ def _v1_class(name: str):
 def make_v1_baseline(name: str, io: TaskIO, hidden: int, *, n_layers: int = 4, geometry: str = "normalized",
                      v1_exact: bool = False, normalize: bool = False, filter_init: str = "v1", head: str = "node",
                      directional: bool = True, node_columns: list[int] | None = None,
-                     amp: bool = False) -> BaselineModel:
+                     amp: bool = False, radial: bool = False) -> BaselineModel:
     """Build a v1 baseline (``NODE_CORES`` or ``COMPLEX_CORES``) for task ``io`` with width ``hidden``.
 
     Args:
@@ -597,6 +615,7 @@ def make_v1_baseline(name: str, io: TaskIO, hidden: int, *, n_layers: int = 4, g
             ``'v1_edge'`` (v1's own edge readout on ``x_1``; the task must carry the edge-averaged target).
         directional / node_columns: input encoding (``NodeInputEncoder``).
         amp: bf16 autocast.
+        radial: GEM-CNN only: edge-length dependent kernels (``GEMCore``; not v1).
     Returns:
         :class:`BaselineModel`.
     """
@@ -607,6 +626,10 @@ def make_v1_baseline(name: str, io: TaskIO, hidden: int, *, n_layers: int = 4, g
     cls = _v1_class(name)
     build = dict(hidden=hidden, n_layers=n_layers, geometry=geometry, v1_exact=v1_exact, normalize=normalize,
                  filter_init=filter_init, head=head, directional=directional, node_columns=node_columns)
+    if radial:
+        if name != "gem_cnn":
+            raise ValueError("radial kernels are implemented for gem_cnn only")
+        build["radial"] = True
     if name in NODE_CORES:
         v1m = cls(f_in=f_in, hidden=hidden, n_layers=n_layers, out_dim=out, task="node")
         node_net = edge_net = None
@@ -626,6 +649,8 @@ def make_v1_baseline(name: str, io: TaskIO, hidden: int, *, n_layers: int = 4, g
             kw["geometry"] = geometry
         if name in ("gauge_cnn", "gem_cnn"):
             kw["v1_exact"] = v1_exact
+        if radial:
+            kw["radial"] = True
         core = NODE_CORES[name](v1m, **kw)
         head = node_model_head(io, hidden, node_net=node_net, edge_net=edge_net)
     elif name in COMPLEX_CORES:
@@ -692,7 +717,7 @@ def make_ours_v1(io: TaskIO, C: int, *, directional: bool = True, eval_per_sampl
                                 metric_rank=8)
     core = V1OursCore(v1m, (n0, n1, n2), eval_per_sample=eval_per_sample)
     info = {"name": "ours_v1", "C": C, "v1_task": task, "encoder": enc.layout, "f_in": enc.out_dim,
-            "note": "v1 paper model (per-cell metric bases, batch-coupled forward_batch in training)"}
+            "note": "original v1 model (per-cell metric bases, batch-coupled forward_batch in training)"}
     return BaselineModel("ours_v1", enc, core, None, build=dict(C=C, directional=directional,
                                                                 eval_per_sample=eval_per_sample),
                          info=info, amp=amp)

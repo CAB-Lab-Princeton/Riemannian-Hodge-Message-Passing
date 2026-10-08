@@ -257,13 +257,17 @@ _TENSOR_FIELDS = ("cells", "d", "dT", "d_abs", "dT_abs", "pos", "geo", "star", "
 # ==============================================================================================
 # validation
 # ==============================================================================================
-def _validate_simplices(P: Tensor, S: Tensor) -> tuple[Tensor, dict]:
-    """Drop simplices with repeated vertices, zero measure, or duplicate vertex sets (first kept)."""
+def _validate_simplices(P: Tensor, S: Tensor, period=None) -> tuple[Tensor, dict]:
+    """Drop simplices with repeated vertices, zero measure, or duplicate vertex sets (first kept).  On a periodic
+    complex (``period``) the measures are taken in the simplices' own unwrapped frames."""
     m, r = S.shape
     n0 = P.shape[0]
     Ss = S.sort(dim=1).values
     rep = (Ss[:, 1:] == Ss[:, :-1]).any(dim=1)
-    X = _geometry._pad3(P)[S]  # (m, r, 3)
+    if period is None:
+        X = _geometry._pad3(P)[S]  # (m, r, 3)
+    else:
+        X = _geometry.local_cell_positions(_geometry._pad3(P), S, period)
     E = X[:, 1:] - X[:, :1]  # (m, r-1, 3)
     if r == 3:
         meas = torch.linalg.cross(E[:, 0], E[:, 1], dim=-1).norm(dim=-1)
@@ -312,8 +316,9 @@ def validate_triangles(pos, faces) -> tuple[Tensor, dict]:
     return _validate_simplices(P, F)
 
 
-def _validate_polygons(P: Tensor, F: Tensor, validate: bool) -> tuple[Tensor, dict]:
-    """Check padding, drop polygons with < 3 vertices, repeated vertices, zero area or duplicates."""
+def _validate_polygons(P: Tensor, F: Tensor, validate: bool, period=None) -> tuple[Tensor, dict]:
+    """Check padding, drop polygons with < 3 vertices, repeated vertices, zero area or duplicates (areas and edge
+    lengths in the polygons' own unwrapped frames on a periodic complex)."""
     n2, M = F.shape
     n0 = P.shape[0]
     valid = F >= 0
@@ -332,11 +337,18 @@ def _validate_polygons(P: Tensor, F: Tensor, validate: bool) -> tuple[Tensor, di
             )
         return F, dict(n_input=n2, kept_index=torch.arange(n2, device=F.device))
     Lc = L.clamp_min(3)
-    area, _, _ = _geometry.face_measures(_geometry._pad3(P), F, Lc)
-    Fz = F.clamp_min(0)
-    nxt = torch.gather(Fz, 1, (torch.arange(M, device=F.device)[None, :] + 1) % Lc[:, None])
-    P3 = _geometry._pad3(P)
-    elen = (P3[nxt] - P3[Fz]).norm(dim=-1) * valid
+    if period is None:
+        area, _, _ = _geometry.face_measures(_geometry._pad3(P), F, Lc)
+        Fz = F.clamp_min(0)
+        nxt = torch.gather(Fz, 1, (torch.arange(M, device=F.device)[None, :] + 1) % Lc[:, None])
+        P3 = _geometry._pad3(P)
+        elen = (P3[nxt] - P3[Fz]).norm(dim=-1) * valid
+    else:
+        X = _geometry.local_cell_positions(_geometry._pad3(P), F, period)            # (n2, M, 3)
+        ids = torch.arange(n2 * M, device=F.device).view(n2, M)
+        area, _, _ = _geometry.face_measures(X.reshape(-1, 3), torch.where(valid, ids, -1), Lc)
+        slot = ((torch.arange(M, device=F.device)[None, :] + 1) % Lc[:, None])[..., None].expand(n2, M, 3)
+        elen = (torch.gather(X, 1, slot) - X).norm(dim=-1) * valid
     lmax = elen.amax(dim=1)
     flat = (~bad) & (2.0 * area <= DEGENERATE_REL_MEASURE * lmax.pow(2))
     keep_idx = (~(bad | flat)).nonzero().squeeze(1)
@@ -395,13 +407,18 @@ class CochainComplex:
             :func:`rhmp.geometry.whitney_tets` and :mod:`rhmp.dec`), plus CSR ``gather ((m_k n_top), n_k)`` and
             ``scatter (n_k, (m_k n_top))`` maps between k-cells and per-top-cell slots (slot-major rows).
         meta: extra info: ``cell_type, star_type, geo_features, sizes, ptr, validation, face_index,
-            geometry_stats, build_time_s``; ``face_edges (n2, m)`` edge ids of every face in cyclic order
+            geometry_stats, build_time_s``; ``geo_log_median``: per degree ``(num_graphs, G_k)`` float64 log medians
+            behind the relative descriptor columns (``rhmp.geometry.GEO_RELATIVE_COLUMNS``; 0 elsewhere);
+            ``face_edges (n2, m)`` edge ids of every face in cyclic order
             (edge j joins vertex j and j+1 of ``cells[2]``; -1 padded) with ``face_edge_signs`` (+-1, 0 pad);
             tets: ``tet_faces (n3, 4)`` (face i omits local vertex i) with ``tet_face_signs``; polygons:
             ``face_lengths (n2,)``; grids: ``grid_shape``, ``spacing``, ``diagonal``; ``beta_unit``: per-graph
             ``(num_graphs,)`` Gershgorin bounds of ``S^{-1/2} A^T A S^{-1/2}`` with keys ``'up{k}_dec'``
             (A = d_k, S = star_k), ``'up{k}_none'`` (S = 1), ``'down{k}_dec'`` (A = d_{k-1}^T, S = 1/star_k),
-            ``'down{k}_none'``.
+            ``'down{k}_none'``.  Optional, set by a task and concatenated by ``batch`` when every part has them as
+            dicts: ``dirichlet = {k: (n_k,) bool}`` (fixed cells of solve / projection layers; default: the boundary
+            cells) and ``cohomology = {k: (n_k, r)}`` (closed k-cochains generating ``H^k``, e.g.
+            :func:`rhmp.dec.cohomology_generators`; parts with fewer generators are padded with zero columns).
     """
 
     dim: int
@@ -524,9 +541,30 @@ class CochainComplex:
         return spmm(self.dT_abs[k], x, self.d_abs[k])
 
     def edge_vectors(self) -> Tensor:
-        """``(n1, D)`` edge vectors ``pos[dst] - pos[src]`` (E(n)-equivariant)."""
+        """``(n1, D)`` edge vectors ``pos[dst] - pos[src]`` (E(n)-equivariant); on a periodic complex
+        (``meta['period']``) their minimal images (block-diagonal batches with periodic parts store them in
+        ``meta['edge_vectors']``)."""
+        ev = self.meta.get("edge_vectors")
+        if ev is not None:
+            return ev
         e = self.cells[1]
-        return self.pos[e[:, 1]] - self.pos[e[:, 0]]
+        ev = self.pos[e[:, 1]] - self.pos[e[:, 0]]
+        period = self.meta.get("period")
+        return ev if period is None else _geometry.min_image(ev, period)
+
+    def cell_positions(self, k: int) -> Tensor:
+        """Vertex positions of the k-cells, ``(n_k, m, D)`` (``-1`` padded slots repeat the first vertex).
+
+        On a periodic complex every cell is given in its own unwrapped frame (first vertex plus the minimal images of
+        the others, :func:`rhmp.geometry.local_cell_positions`); use this instead of ``pos[cells[k]]`` for anything
+        geometric (signed areas, barycentric gradients).
+        """
+        if not 1 <= k <= self.dim:
+            raise ValueError(f"cell_positions: degree k={k} out of range 1..{self.dim}")
+        cp = self.meta.get("cell_positions")
+        if cp is not None and k in cp:
+            return cp[k]
+        return _geometry.local_cell_positions(self.pos, self.cells[k].long(), self.meta.get("period"))
 
     def check_d2(self) -> float:
         """``max_k max |d_{k+1} d_k|`` computed with sparse products (0.0 for a valid complex)."""
@@ -540,7 +578,8 @@ class CochainComplex:
 
     # ------------------------------------------------------------------ builders
     @staticmethod
-    def from_triangles(pos, faces, *, star: str = "cotan", validate: bool = True, device=None) -> "CochainComplex":
+    def from_triangles(pos, faces, *, star: str = "cotan", validate: bool = True, device=None,
+                       period=None) -> "CochainComplex":
         """Triangle mesh (planar 2-D or surface in 3-D; boundaries and non-manifold edges allowed).
 
         Args:
@@ -551,6 +590,9 @@ class CochainComplex:
                 ``meta['face_index']`` maps kept faces to input rows).  With ``False`` faces with repeated
                 vertices raise.
             device: target device (default: device of ``pos`` if a tensor, else CPU).
+            period: ``None`` or the axis-aligned periods ``(L_x, L_y[, L_z])`` of a flat torus: faces may wrap around
+                and all geometry is intrinsic to the torus (minimal-image edge vectors, every face measured in its
+                own unwrapped frame; ``meta['period']``).
         Returns:
             :class:`CochainComplex` with ``dim = 2``.
         """
@@ -560,18 +602,18 @@ class CochainComplex:
         F = _to_index(faces, dev, "faces")
         _check_cells(F, P.shape[0], 3, "faces")
         if validate:
-            F, vstats = _validate_simplices(P, F)
+            F, vstats = _validate_simplices(P, F, period)
             _warn_dropped("from_triangles", vstats)
         else:
             _require_distinct(F, "faces")
             vstats = dict(n_input=F.shape[0], kept_index=torch.arange(F.shape[0], device=dev))
         face_len = torch.full((F.shape[0],), 3, dtype=torch.long, device=dev)
         return _build_surface(P, F, face_len, star=star, cell_type="triangle", vstats=vstats, t0=t0,
-                              warn=validate)
+                              warn=validate, period=period)
 
     @staticmethod
     def from_polygons(pos, faces, *, star: str = "barycentric", validate: bool = True,
-                      device=None) -> "CochainComplex":
+                      device=None, period=None) -> "CochainComplex":
         """Polygonal (CW) 2-complex: quads, mixed polygons, triangles.
 
         Args:
@@ -582,6 +624,7 @@ class CochainComplex:
                 edges on polygons = circumcentric on rectangles) | ``'unit'``.
             validate: drop polygons with < 3 vertices, repeated vertices, zero area, duplicates (warning).
             device: target device.
+            period: ``None`` or the axis periods of a flat torus (periodic complex, see :meth:`from_triangles`).
         Returns:
             :class:`CochainComplex` with ``dim = 2`` and ``cells[2]`` of shape ``(n2, M)`` (``-1`` padded);
             ``d[1]`` rows list the boundary edges in cyclic order with orientation signs.
@@ -591,12 +634,12 @@ class CochainComplex:
         P = _to_pos64(pos, dev)
         F = _pad_polygons(faces, dev)
         _check_cells(F, P.shape[0], None, "faces")
-        F, vstats = _validate_polygons(P, F, validate)
+        F, vstats = _validate_polygons(P, F, validate, period)
         if validate:
             _warn_dropped("from_polygons", vstats)
         face_len = (F >= 0).sum(1)
         return _build_surface(P, F, face_len, star=star, cell_type="polygon", vstats=vstats, t0=t0,
-                              warn=validate)
+                              warn=validate, period=period)
 
     @staticmethod
     def from_tetrahedra(pos, tets, *, star: str = "barycentric", validate: bool = True,
@@ -632,7 +675,7 @@ class CochainComplex:
 
     @staticmethod
     def from_grid(shape: tuple[int, int], spacing=1.0, *, cell: str = "quad", star: str | None = None,
-                  diagonal: str = "v1", device=None) -> "CochainComplex":
+                  diagonal: str | None = None, device=None, periodic: bool = False) -> "CochainComplex":
         """Regular 2-D grid with ``nx * ny`` vertices, vertex id ``i * ny + j`` at ``(i*sx, j*sy)``.
 
         The vertex numbering is the v1 convention (``meshgrid(xs, ys, indexing='ij')``, as in the v1 PDEBench
@@ -640,16 +683,21 @@ class CochainComplex:
         ``field[ix, iy].reshape(-1)`` lines up.
 
         Args:
-            shape: ``(nx, ny)`` vertices per axis (>= 2 each).
+            shape: ``(nx, ny)`` vertices per axis (>= 2 each; >= 3 for ``periodic``).
             spacing: ``h`` or ``(sx, sy)``.  ``from_grid((32, 32), 1/31, cell='tri')`` reproduces T1.
             cell: ``'quad'`` (CCW quads ``[v00, v10, v11, v01]``) or ``'tri'``.
             star: default ``'cotan'`` for triangles, ``'barycentric'`` for quads (identical on rectangles).
-            diagonal: triangle split for ``cell='tri'``: ``'v1'`` (default) = scipy/qhull Delaunay of the
-                ``linspace(0, 1, n)`` grid exactly as v1 built T1 (degenerate cocircular squares ->
+            diagonal: triangle split for ``cell='tri'``: ``'v1'`` (default without ``periodic``) = scipy/qhull
+                Delaunay of the ``linspace(0, 1, n)`` grid exactly as v1 built T1 (degenerate cocircular squares ->
                 qhull-chosen diagonals; verified identical to the T1 faces with scipy 1.17), faces made
-                CCW; ``'main'`` (v00-v11), ``'anti'`` (v10-v01), ``'alternate'`` (checkerboard) are
-                deterministic and need no scipy.
+                CCW; ``'main'`` (v00-v11; default with ``periodic``), ``'anti'`` (v10-v01), ``'alternate'``
+                (checkerboard) are deterministic and need no scipy.
             device: target device.
+            periodic: flat torus of size ``(nx sx) x (ny sy)``: the cells of the squares ``(i, j)``, ``i < nx``,
+                ``j < ny``, join vertex ``(i, j)`` to ``((i + 1) % nx, (j + 1) % ny)`` (wrap-around edges and faces),
+                all cells are congruent and the geometry is intrinsic (minimal-image edge vectors, cells measured in
+                their own unwrapped frames; ``meta['period'] = (nx sx, ny sy)``).  Euler characteristic 0, Betti
+                numbers ``(1, 2, 1)``, no boundary.
         Returns:
             :class:`CochainComplex` (``cell_type`` ``'quad'`` or ``'triangle'``) with ``meta['grid_shape']``.
         """
@@ -657,25 +705,40 @@ class CochainComplex:
         nx, ny = int(shape[0]), int(shape[1])
         if nx < 2 or ny < 2:
             raise ValueError(f"grid shape must be >= (2, 2), got {shape}")
+        if periodic and (nx < 3 or ny < 3):
+            raise ValueError(f"a periodic grid needs >= 3 vertices per axis (distinct wrap-around edges), got {shape}")
         sx, sy = (float(spacing), float(spacing)) if np.isscalar(spacing) else (float(spacing[0]), float(spacing[1]))
         if sx <= 0 or sy <= 0:
             raise ValueError("grid spacing must be positive")
+        diagonal = diagonal or ("main" if periodic else "v1")
         dev = torch.device(device) if device is not None else torch.device("cpu")
         ii, jj = torch.meshgrid(torch.arange(nx, dtype=torch.float64), torch.arange(ny, dtype=torch.float64),
                                 indexing="ij")
         P = torch.stack([ii.reshape(-1) * sx, jj.reshape(-1) * sy], dim=1).to(dev)
-        i, j = torch.meshgrid(torch.arange(nx - 1), torch.arange(ny - 1), indexing="ij")
-        i, j = i.reshape(-1), j.reshape(-1)
-        v00, v10, v11, v01 = i * ny + j, (i + 1) * ny + j, (i + 1) * ny + j + 1, i * ny + j + 1
+        if periodic:
+            i, j = torch.meshgrid(torch.arange(nx), torch.arange(ny), indexing="ij")
+            i, j = i.reshape(-1), j.reshape(-1)
+            ip, jp = (i + 1) % nx, (j + 1) % ny
+            v00, v10, v11, v01 = i * ny + j, ip * ny + j, ip * ny + jp, i * ny + jp
+        else:
+            i, j = torch.meshgrid(torch.arange(nx - 1), torch.arange(ny - 1), indexing="ij")
+            i, j = i.reshape(-1), j.reshape(-1)
+            v00, v10, v11, v01 = i * ny + j, (i + 1) * ny + j, (i + 1) * ny + j + 1, i * ny + j + 1
+        period = (nx * sx, ny * sy) if periodic else None
         vstats_extra = dict(grid_shape=(nx, ny), spacing=(sx, sy))
+        if periodic:
+            vstats_extra["periodic"] = True
         if cell == "quad":
             F = torch.stack([v00, v10, v11, v01], dim=1).to(dev)
             face_len = torch.full((F.shape[0],), 4, dtype=torch.long, device=dev)
             vstats = dict(n_input=F.shape[0], kept_index=torch.arange(F.shape[0], device=dev))
             K = _build_surface(P, F, face_len, star=star or "barycentric", cell_type="quad", vstats=vstats,
-                               t0=t0, warn=False)
+                               t0=t0, warn=False, period=period)
         elif cell == "tri":
             if diagonal == "v1":
+                if periodic:
+                    raise ValueError("diagonal='v1' (the Delaunay grid of v1) is not periodic; use 'main', 'anti' or "
+                                     "'alternate' with periodic=True")
                 F = torch.from_numpy(_v1_grid_triangles(nx, ny)).to(dev)
             else:
                 main = torch.stack([torch.stack([v00, v10, v11], 1), torch.stack([v00, v11, v01], 1)], 1)
@@ -692,7 +755,7 @@ class CochainComplex:
             face_len = torch.full((F.shape[0],), 3, dtype=torch.long, device=dev)
             vstats = dict(n_input=F.shape[0], kept_index=torch.arange(F.shape[0], device=dev))
             K = _build_surface(P, F, face_len, star=star or "cotan", cell_type="triangle", vstats=vstats,
-                               t0=t0, warn=False)
+                               t0=t0, warn=False, period=period)
             vstats_extra["diagonal"] = diagonal
         else:
             raise ValueError(f"unknown cell {cell!r}; use 'quad' or 'tri'")
@@ -767,7 +830,7 @@ def _beta_unit_meta(K: "CochainComplex") -> dict:
 
 
 def _build_surface(P: Tensor, F: Tensor, face_len: Tensor, *, star: str, cell_type: str, vstats: dict,
-                   t0: float, warn: bool) -> CochainComplex:
+                   t0: float, warn: bool, period=None) -> CochainComplex:
     n0, n2 = P.shape[0], F.shape[0]
     dev = P.device
     corner = _corner_table(F, face_len)
@@ -776,7 +839,11 @@ def _build_surface(P: Tensor, F: Tensor, face_len: Tensor, *, star: str, cell_ty
     n1 = edges.shape[0]
     D0 = _d0_set(edges, n0)
     D1 = _operator_set(corner["face"], ce, csign, (n2, n1))
-    g = _geometry.surface_geometry(P, F, face_len, edges, corner, star=star)
+    if period is not None:
+        period = tuple(float(v) for v in period)
+        if len(period) > P.shape[1] or not all(v > 0 for v in period):
+            raise ValueError(f"period must have <= {P.shape[1]} positive entries, got {period}")
+    g = _geometry.surface_geometry(P, F, face_len, edges, corner, star=star, period=period)
     if warn and g["stats"]["n_isolated_vertices"]:
         warnings.warn(f"{g['stats']['n_isolated_vertices']} vertices belong to no face (kept; star0 set to the "
                       "median dual area)", RuntimeWarning, stacklevel=3)
@@ -790,13 +857,21 @@ def _build_surface(P: Tensor, F: Tensor, face_len: Tensor, *, star: str, cell_ty
         geo_features={k: _geometry.GEO_FEATURE_NAMES[k] for k in range(3)},
         face_index=vstats.pop("kept_index"), validation=vstats, geometry_stats=g["stats"],
         face_edges=face_edges, face_edge_signs=face_edge_signs,
+        geo_log_median=[v.view(1, -1) for v in g["geo_log_median"]],
         **_single_meta(n, dev),
     )
     if cell_type in ("polygon", "quad"):
         meta["face_lengths"] = face_len
+    if period is not None:
+        meta["period"] = period
     whitney = {}
-    if F.shape[1] == 3:  # simplicial 2-complex: Whitney 1-form Galerkin blocks
+    if F.shape[1] == 3 and period is None:  # simplicial 2-complex: Whitney 1-form Galerkin blocks
         whitney[1] = _finish_whitney(_geometry.whitney_triangles(P, F, face_edges, face_edge_signs), 1, 2, n1)
+    elif F.shape[1] == 3:                   # periodic: every triangle in its own unwrapped frame
+        X = _geometry.local_cell_positions(P, F, period)
+        ids = torch.arange(F.numel(), device=dev).view(F.shape)
+        whitney[1] = _finish_whitney(_geometry.whitney_triangles(X.reshape(-1, X.shape[-1]), ids, face_edges,
+                                                                 face_edge_signs), 1, 2, n1)
     K = CochainComplex(
         dim=2, n=n, cells=[torch.arange(n0, device=dev)[:, None], edges, F],
         d=[D0[0], D1[0]], dT=[D0[1], D1[1]], d_abs=[D0[2], D1[2]], dT_abs=[D0[3], D1[3]],
@@ -846,6 +921,7 @@ def _build_volume(P: Tensor, T: Tensor, *, star: str, vstats: dict, t0: float, w
         face_index=vstats.pop("kept_index"), validation=vstats, geometry_stats=g["stats"],
         face_edges=face_edge, face_edge_signs=tri_sign.repeat(n2).view(n2, 3),
         tet_faces=tet_face, tet_face_signs=fsign,
+        geo_log_median=[v.view(1, -1) for v in g["geo_log_median"]],
         **_single_meta(n, dev),
     )
     w1, w2 = _geometry.whitney_tets(P, T, tet_edge, tet_face)
@@ -921,12 +997,36 @@ def batch_complexes(complexes: list[CochainComplex]) -> CochainComplex:
     )
     if all("face_lengths" in K.meta for K in complexes):
         meta["face_lengths"] = torch.cat([K.meta["face_lengths"] for K in complexes])
+    if all("geo_log_median" in K.meta for K in complexes):                 # (num_graphs, G_k) per degree
+        meta["geo_log_median"] = [torch.cat([K.meta["geo_log_median"][k] for K in complexes]) for k in range(dim + 1)]
     for key, sgn, deg in (("face_edges", "face_edge_signs", 1), ("tet_faces", "tet_face_signs", 2)):
         if all(key in K.meta for K in complexes):
             meta[key], meta[sgn] = _cat_offset_padded(complexes, key, sgn, deg)
     if all("beta_unit" in K.meta for K in complexes):
         keys = set.intersection(*(set(K.meta["beta_unit"]) for K in complexes))
         meta["beta_unit"] = {key: torch.cat([K.meta["beta_unit"][key] for K in complexes]) for key in sorted(keys)}
+    for key in ("dirichlet", "cohomology"):                   # per-cell fields of the domain that travel with the mesh
+        if all(isinstance(K.meta.get(key), dict) for K in complexes):
+            degs = set.intersection(*(set(K.meta[key]) for K in complexes))
+            merged = {}
+            for k in sorted(degs):
+                parts = [K.meta[key][k] for K in complexes]
+                if key == "cohomology":                       # (n_k, r) generators: zero columns up to the widest
+                    r = max(p.shape[1] for p in parts)
+                    parts = [p if p.shape[1] == r else torch.cat([p, p.new_zeros(p.shape[0], r - p.shape[1])], 1)
+                             for p in parts]
+                merged[k] = torch.cat(parts)
+            meta[key] = merged
+    if any(K.meta.get("period") is not None or "edge_vectors" in K.meta for K in complexes):
+        # periodic parts: the minimal-image edge vectors and the unwrapped cell frames do not follow from ``pos``
+        meta["edge_vectors"] = torch.cat([K.edge_vectors() for K in complexes])
+        cps = {}
+        for k in range(1, dim + 1):
+            parts = [K.cell_positions(k) for K in complexes]
+            w = max(p.shape[1] for p in parts)
+            cps[k] = torch.cat([p if p.shape[1] == w else torch.cat([p, p[:, :1].expand(-1, w - p.shape[1], -1)], 1)
+                                for p in parts])
+        meta["cell_positions"] = cps
     whitney = _merge_whitney(complexes)
     cat = lambda lists: [torch.cat([L[k] for L in lists]) for k in range(len(lists[0]))]  # noqa: E731
     return CochainComplex(

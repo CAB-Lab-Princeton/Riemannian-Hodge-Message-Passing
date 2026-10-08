@@ -1,108 +1,227 @@
-# RHMP v2: learning physical fields on meshes through a learned discrete metric
+# Riemannian Hodge Message Passing (RHMP)
 
-`rhmp` is a PyTorch library for learning physical fields on meshes: temperatures, pressures, potentials, fluxes and
-gauge fields on triangle meshes, curved surfaces and tetrahedral volumes.  Its one design decision: the mesh is turned
-into an exact discrete calculus (a *cochain complex*, with fields living on vertices, edges, faces or cells), and every
-operator the network applies is a discrete gradient, divergence or Laplacian assembled from that calculus and a
-learned **metric**, a per-cell material tensor.  Nothing else in the network moves information across the mesh.
+`rhmp` is a PyTorch library for learning physical fields on meshes: scalars, fluxes, gauge connections and pressures
+on triangle meshes, curved surfaces, tetrahedral volumes and grids.  The mesh is turned into a cochain complex whose
+coboundaries `d_k` (discrete gradient, curl, divergence) are fixed by oriented incidence, and the network learns
+symmetric positive-definite cochain metrics `H_k` from local, coordinate-free geometric and material descriptors.
+Every propagation step is a metric-weighted Hodge block `d_k^T H_{k+1} d_k` (or its resolvent, solve or projection),
+so the differential identities (`d_{k+1} d_k = 0`, nonnegative energies, positive-semidefinite operators, exact
+Abelian gauge invariance) hold by construction while geometry, material response and anisotropic coupling are learned.
+The metric is invariant under orthogonal changes of the hidden feature basis, which makes the propagation
+cochain-frame equivariant.  This repository is the code of *Learning Discrete Riemannian Metrics for Physical Fields
+with Cochain-Frame Equivariance* (Zheng & Allen-Blanchette, NeurIPS 2026, spotlight; arXiv:2608.14556): the library,
+the seven benchmark tasks, the baselines, the trained models of the paper's tables and the scripts that reproduce them.
 
-That single choice buys four things that ordinary mesh networks lack: models that work on meshes and resolutions they
-were never trained on, exact conservation laws and symmetries, correct treatment of anisotropic materials, and a model
-whose learned metric can be read off as the physical material.
+## The seven tasks
 
-This is the code base (release 2.0) of *Learning Discrete Riemannian Metrics for Physical Fields with Cochain-Frame
-Equivariance* (Zheng & Allen-Blanchette, **NeurIPS 2026, spotlight**; arXiv:2608.14556).  Every number below is documented in the technical
-report [REPORT.md](REPORT.md); the per-run tables are in [results/RESULTS.md](results/RESULTS.md).
+| task (paper) | physics | task code (RHMP / baselines) | data (`datasets/README.md`) |
+|---|---|---|---|
+| NS vorticity on a stretched periodic grid | compressible Navier-Stokes fields of PDEBench sampled on a periodic 32x32 tensor-product grid whose spacings vary by a factor 8 along each axis; (rho, v, p) at step t -> vorticity at step t+1; zero-shot grids: a second stretched grid, uniform 32^2 and 64^2 grids, the rotated training grid | `T1gml_mean` / `T1g` | `T1_cns_vorticity.pkl` + `v2/T1_cns_vorticity_graded.pkl` |
+| Anisotropic transport on a torus | advection-diffusion `d_t u + div(v u) = div(D grad u)` on a torus with a divergence-free velocity and field-aligned anisotropic diffusion (ratio 1..100); initial field -> field at `T`; zero-shot: faster flows, ratios 300 / 1000, two-step roll-out, finer / coarser tori, rotations | `T2a` | `T2_torus_advection_diffusion.pkl` + `v2/T2v.pt`, `v2/T2a.pt` |
+| Ellipsoid surface flow | tangent vector field `v = n x grad(psi)` on an ellipsoid surface from its stream-function source; RHMP predicts the stream function and applies the exact map | `T3g` / `T3` | `T3_ellipsoid_coexact.pkl` |
+| Nonlinear anisotropic magnetostatics | 2-D `curl H(B) = J` with grain-oriented and laminated steel (nonlinear, anisotropic constitutive law) in electromagnets and transformers of several layout families; currents and material layout -> vector potential; zero-shot: currents x 1.5, a held-out layout family, finer / coarser meshes, rotations | `MXA` | `v2/MXA*.pt` |
+| U(1) Wilson loop | a U(1) connection on the edges of a random Delaunay mesh -> its plaquette curvature; zero-shot: new meshes, anisotropic and finer meshes, gauge transformations, rotations | `T6` | `T6_wilson_loop.pkl` + `v2/T6_native.pt` |
+| SU(2) Yang-Mills | an su(2) connection on the edges -> the field strength `F = dA + [A, A]` (node target; `T7f`: the field strength on the faces) | `T7` (`T7f`) | `T7_yang_mills_su2.pkl` + `v2/T7_native.pt` |
+| AirfRANS pressure on body-fitted meshes | the AirfRANS RANS simulations re-meshed on conforming near-field meshes (1.9K nodes, one mesh per airfoil); signed distance, inlet speed and angle of attack -> pressure; zero-shot: 0.55K- and 6.9K-node meshes of the same airfoils, rotations | `AFPi0` / `AFP` | `v2/AFM*.pt` (from the AirfRANS data) |
 
-## Two kinds of models
-
-* **The physics-solver model** (a few thousand parameters).  The network only produces the metric, i.e. the material
-  tensor of every cell, from local inputs; the model then *solves* the discrete PDE with that metric, exactly as a
-  finite-element solver would.  Its only nonlinearity is the map from inputs to material.  The report calls this
-  *solver mode*.
-* **The general network** (about 90K parameters).  A nonlinear message-passing network in which every propagation step
-  is still a metric-weighted discrete operator, but with learned features, gates and several layers.  The report calls
-  this the *general stack*.
-
-Scores are R2 (coefficient of determination; 1 is a perfect prediction).  "4x-resolution" means the trained model is
-evaluated, without any retraining, on meshes four times finer than those it was trained on.
-
-## Four results
-
-**1. Anisotropic materials need a tensor metric, and the library has one.**  A material whose conductivity depends on
-direction (layered rock, fibres, a stretched grid) leads to discrete operators with negative couplings between
-neighbouring vertices.  A metric with one number per cell (a *diagonal metric*) can only produce non-negative
-couplings, so it cannot represent such materials, whatever it learns.  A full symmetric positive-definite tensor per
-cell (the *tensor metric*) can, and it reproduces exactly the finite-element operators of anisotropic diffusion and
-of curl-curl problems ([docs/THEORY.md](docs/THEORY.md)).  With the physics-solver model:
-
-| task (test R2 / 4x-resolution R2) | diagonal metric | tensor metric |
-|---|---:|---:|
-| 2-D diffusion, anisotropy ratio 100, principal axes not aligned with the mesh | 0.832 / 0.699 | **0.964 / 0.958** |
-| the same with ratio 10 | 0.965 / 0.914 | **0.992 / 0.928** |
-| fibre diffusion on curved closed surfaces, ratio 100 | 0.823 / 0.822 | **0.961 / 0.956** |
-| 3-D Darcy flow in a tetrahedral volume, ratio 100 (1500 samples) | 0.919 / 0.866 | **0.977 / 0.970** |
-| the paper's electrostatics task (its reference data contain negative couplings); first 100 test samples | 0.464 | **1.000** |
-
-On the first task, MeshGraphNet reaches 0.665 / 0.400 with 92K parameters; the tensor-metric solver has 2.5K.
-
-![diagonal vs tensor metric](docs/figures/fig3_aniso_diag_vs_tensor.png)
-
-**2. Trained models transfer to new meshes and resolutions.**  The model has no parameters attached to individual
-cells: the metric is a function of local, scale-free geometric quantities, and every operator is normalised per
-sample.  A gauge-field model trained on a single mesh (edge connection in, face flux out) keeps R2 0.9961 and 0.9999
-on two random meshes it has never seen, 0.9999 on a 4x finer mesh and 0.9997 on a 4x coarser one.  On heterogeneous diffusion (conductivity varying by a factor of 100 across
-the domain), the physics-solver model keeps **R2 1.0000 at 4x resolution**, while MeshGraphNet drops from 0.949 to
-0.258 (at the same parameter budget) or from 0.927 to 0.4345 (with five times more parameters).
-
-![resolution transfer on heterogeneous diffusion](docs/figures/fig1_hp_k100_transfer.png)
-
-**3. Structure is exact, and tested.**  The discrete identity "curl of a gradient is zero" holds to machine precision
-on every mesh and batch.  Rotating or reflecting the mesh, renumbering its vertices, flipping face orientations,
-changing the gauge of a connection field, or changing which samples share a batch are exact symmetries: the R2 of
-trained models changes by 1e-11 to 4e-9 under them.  Dedicated output layers make predictions exactly curl-free,
-divergence-free or mass-conserving, and every operator has norm at most 1, so deep stacks cannot blow up.  The test
-suite (1771 tests, CPU and CUDA) checks each of these guarantees.
-
-**4. When the model solves with its metric, the learned metric is the material.**  In the physics-solver model the
-material inputs reach only the metric, and the model solves with it.  The learned per-cell tensors then match the true
-conductivity **in physical units**: on heterogeneous diffusion, the learned log conductivity versus the true one has
-correlation 0.996, slope 1.04 and intercept 0.005 (correlation 0.993 for the edge couplings), with 2.4K parameters and
-test R2 0.9999.  Freezing the metric at the true material reproduces the finite-element solution with no training at
-all (R2 0.99999999, verified by the test suite).  In the general network, where the material also feeds the ordinary
-features, the metric does not become the material (correlation at most 0.3 in magnitude, with mixed signs): an accurate
-model is not automatically an interpretable one.
-
-![metric recovery](docs/figures/fig2_metric_recovery.png)
-
-The report also documents what did not work ([REPORT.md](REPORT.md) sections 8 and 9): on the paper's airfoil-pressure
-task this model (0.51) trails GEM-CNN (0.70) and the checkpoint of the original paper release (0.62); the closed-surface diffusion task does not
-separate methods (MeshGraphNet 0.9997, v2 0.9967, both transfer without loss); tensor metrics on the 3000-sample
-tetrahedral data sets need about 137 GB of host memory; and the exactly mass-conserving variant of the time-stepping
-model is unstable over long rollouts.
-
-## What it looks like
-
-![one heterogeneous diffusion test problem at the training resolution and on a 4x finer mesh](docs/figures/field1_hetero_poisson_compact.png)
-
-One heterogeneous-diffusion test problem (conductivity contrast 100; the first test sample, not a selected one) at the
-training resolution and on a 4x finer mesh that no model saw in training.  The physics-solver model (2.4K parameters)
-cannot be told apart from the finite-element solution on either mesh; the general network and MeshGraphNet lose the
-solution on the finer mesh.  [REPORT.md section 6.8](REPORT.md#68-qualitative-comparisons) shows the full figure with
-inputs and error maps, and the same kind of comparison for anisotropic media, a gauge field on new meshes, a genus-2
-surface, long rollouts and a vector field on an ellipsoid (drawn by `scripts/make_field_figures.py`).
+Baselines: GCN, GAT, SchNet, EGNN, MPSN, SCCNN, GaugeEquivCNN, GEM-CNN, CW Net, Clifford-SMPN, DeepONet (not on
+AirfRANS) and FNO (NS vorticity only), all trained by the same trainer with their widths matched to the RHMP
+parameter budget of the task (+20 % headroom).  Seed 42 gives the tables; seeds 1 and 2 give the cross-seed
+statistics.  All runs train for 100 epochs and report `result.json["test100"]`: SSIM, Pearson, NRMSE and R2 on the
+first 100 test samples.
 
 ## Install
 
 ```bash
-pip install -e .                 # torch >= 2.4, numpy, scipy (validated: Python 3.12, torch 2.10, CPU and CUDA)
+pip install -e .                 # torch >= 2.4, numpy, scipy (validated with Python 3.12 and torch 2.10, CPU and CUDA)
 pip install -e ".[viz,dev]"      # + matplotlib (figures, example 06) and pytest
-python -m pytest tests -q        # CPU; CUDA tests run when a GPU is visible
+pip install pyvista h5py airfrans   # data sets: the ellipsoid pickle and the torus / AirfRANS generators (pyvista),
+                                    # the NS grid generator (h5py), the AirfRANS download (airfrans)
 ```
 
-The data sets are not part of the repository: `python3 datasets/download_v1.py` fetches the paper's data sets from
-OSF, and `bash scripts/gen_datasets.sh` generates the new ones ([datasets/README.md](datasets/README.md)).  The
-library, the examples and most tests need no data.
+The library, the examples and most tests need no data set.
+
+## Data
+
+```bash
+python3 datasets/download_v1.py          # the original pickles of the paper from OSF (1.1 GB) -> datasets/*.pkl
+bash scripts/gen_datasets.sh             # the generated sets of the seven tasks -> datasets/v2/ (needs a GPU for T6 / T7)
+SRC=/path/to/2D_CFD_Rand_M0.1_Eta0.01_Zeta0.01_periodic_128_Train.hdf5 \
+AIRFRANS_ROOT=/path/to/airfrans/Dataset bash scripts/gen_datasets.sh   # + the NS grid (PDEBench) and AirfRANS sets
+python3 scripts/transfer_eval/gen_planar.py --task T6   # zero-shot meshes of the gauge-field tasks (also --task T7)
+```
+
+[datasets/README.md](datasets/README.md) lists every file with its generator, inputs, seeds and size; every CPU
+generator is deterministic given its seed, and the T6 / T7 regeneration reproduces the original samples with the
+CUDA random number generator.
+
+## Training the models of the paper
+
+`scripts/train_paper_models.sh` holds the exact trainer arguments of every run in `results/` (they are the `args`
+stored in each run's `config.json`):
+
+```bash
+bash scripts/train_paper_models.sh rhmp torus          # the RHMP model of one task  (ns torus ellipsoid maxwell wilson yang_mills yang_mills_face airfrans)
+bash scripts/train_paper_models.sh baselines torus     # its baselines (or a subset: ... baselines torus gcn gem_cnn)
+SEED=1 bash scripts/train_paper_models.sh all          # everything for another seed
+DRY=1 bash scripts/train_paper_models.sh all           # print the commands only
+```
+
+The RHMP configurations (100 epochs, seed 42; `--out` chooses the run directory):
+
+```bash
+# NS vorticity, stretched grid: projection first layer, homogeneous gate, context head with face wedge products (88.8K parameters)
+python3 -m rhmp.train --task T1gml_mean --C 102 --layers project,poly,poly,poly --gate homog --cochain-head context \
+    --lift-context 16 --lift-vertex --readout-depth 3 --readout-spatial --readout-skip --readout-wedge 32 \
+    --readout-hidden 32 --project-solver dense --epochs 100 --seed 42 --out runs/ns_vorticity/rhmp_s42
+# torus transport: projection layer, full tensor metric, resolvent third layer, transport term (35.5K)
+python3 -m rhmp.train --task T2a --layers project,poly,resolvent,poly --metric-type tensor --tensor-param full \
+    --resolvent-iters 12 --metric-ref 1:3 --material 1:2,2:2 --transport '{"inputs":[0],"order":2,"metric":"star"}' \
+    --log-range 5.0 --project-solver dense --epochs 100 --seed 42 --out runs/torus_transport/rhmp_s42
+# ellipsoid flow: linear lifting and stream-function head (13.3K)
+python3 -m rhmp.train --task T3g --lifting linear --readout-head linear --fit-readout --epochs 100 --seed 42 \
+    --out runs/ellipsoid_flow/rhmp_s42
+# magnetostatics: one physical solve layer with four Picard iterations and a tensor metric, material columns only (2,229 parameters)
+python3 -m rhmp.train --task MXA --solver-mode --layers solve --C 4 --metric-type tensor --material 1:7,2:5 \
+    --log-range 5.0 --solve-precond twolevel --solve-iters 128 --solve-tol 1e-05 --solve-picard 4 --no-metric-geo \
+    --eval-batch 16 --epochs 100 --seed 42 --out runs/maxwell_magnetostatics/rhmp_s42
+# Wilson loop: projection first layer (72.9K)
+python3 -m rhmp.train --task T6 --layers project,poly,poly,poly --project-solver dense --epochs 100 --seed 42 \
+    --out runs/wilson_loop/rhmp_s42
+# Yang-Mills: the NS configuration with C = 120 (105.8K); --task T7f for the face target
+python3 -m rhmp.train --task T7 --C 120 --layers project,poly,poly,poly --gate homog --cochain-head context \
+    --lift-context 16 --lift-vertex --readout-depth 3 --readout-spatial --readout-skip --readout-wedge 32 \
+    --readout-hidden 32 --project-solver dense --epochs 100 --seed 42 --out runs/yang_mills/rhmp_s42
+# AirfRANS pressure: projection layer with the sparse-LU solver, energy readout, dynamic similarity (88.9K)
+python3 -m rhmp.train --task AFPi0 --C 118 --layers project,poly,poly,poly --gate homog --lift-context 16 \
+    --lift-vertex --amplitude 1:1 --amplitude-power 2 --amplitude-energy --readout-energy 16 \
+    --project-solver direct --epochs 100 --seed 42 --out runs/airfrans_pressure/rhmp_s42
+```
+
+Baselines take the node inputs (`--legacy`) and a parameter budget in millions where the task sets one:
+
+```bash
+python3 -m rhmp.train --task T1g --legacy --model gem_cnn --param-budget 0.088868 --epochs 100 --seed 42 --out runs/ns_vorticity/gem_cnn_s42
+python3 -m rhmp.train --task T2a --legacy --model gat --param-budget 0.0375 --epochs 100 --seed 42 --out runs/torus_transport/gat_s42   # mpsn: 0.036135
+python3 -m rhmp.train --task T3  --legacy --model gcn --epochs 100 --seed 42 --out runs/ellipsoid_flow/gcn_s42           # T6, T7: the same form
+python3 -m rhmp.train --task MXA --legacy --model mpsn --param-budget 0.091861 --eval-batch 16 --model-opts '{"head":"v1_edge"}' \
+    --epochs 100 --seed 42 --out runs/maxwell_magnetostatics/mpsn_s42                                                 # sccnn, clifford_smpn: the same head
+python3 -m rhmp.train --task AFP --legacy --model cw_net --param-budget 0.089813 --epochs 100 --seed 42 --out runs/airfrans_pressure/cw_net_s42
+```
+
+MPSN, SCCNN and Clifford-SMPN use their original edge protocol on the fixed-mesh tasks (edge-averaged target,
+edge-space metrics; `docs/BASELINES.md`).  Training times of the RHMP runs on one RTX PRO 6000 with nothing else running (100 epochs): about
+0.3 h (ellipsoid), 1.1 h (NS, Wilson loop, Yang-Mills, AirfRANS), 1.5 h (torus) and 2.5 h (magnetostatics); the
+`wall_clock_s` field of a shipped `result.json` is the time of that run on a shared GPU and can be several times longer.
+Runs resume from `last.pt` when interrupted and are skipped when their `result.json` is complete.  The Maxwell
+ablations and the AirfRANS ablations / controls of the paper's appendix are launched by `scripts/run_maxwell.sh` and
+`scripts/run_pressure.sh`; `scripts/run_baselines.sh` trains any baseline on any task.
+
+## Evaluating a checkpoint, zero-shot transfer and rotations
+
+Every RHMP run in `results/` ships its checkpoint (`best.pt`, 6 MB in total).  Re-evaluating one reproduces the
+stored `test` / `test100` metrics (to about 1e-7 relative on the same GPU model):
+
+```bash
+python3 scripts/eval_checkpoint.py results/torus_transport/rhmp_s42                 # test + test100 vs result.json
+python3 scripts/eval_checkpoint.py results/ns_vorticity/rhmp_s42 --extras           # + the zero-shot grids of the run
+python3 -m rhmp.train --task T2a --eval-ckpt results/torus_transport/rhmp_s42 --out runs/eval   # the trainer's evaluation path
+```
+
+The zero-shot and rotation evaluations of the paper (`results/evaluations/`, README there):
+
+```bash
+python3 scripts/eval_frozen_units.py results/ns_vorticity/rhmp_s42 --out runs/ns_zero_shot.json           # NS: new grids, 90-degree rotation
+python3 scripts/eval_torus_aniso.py --runs results/torus_transport/rhmp_s42 --out runs/torus_zero_shot.json  # torus: speeds, ratios, roll-out, meshes, rotations
+python3 scripts/eval_torus_aniso.py --runs results/torus_transport/rhmp_s42 --frozen-auto --out runs/torus_zero_shot_frozen_auto.json
+(cd scripts/transfer_eval && python3 run_eval.py --device cuda --tasks T6,T7 --models rhmp)                 # gauge fields: new meshes, gauge transformations
+(cd scripts/frame_eval && python3 run_eval.py --device cuda --tasks T6,T7 --models rhmp)                    # gauge fields: rigid rotations
+cp -r results/maxwell_magnetostatics/rhmp_s42 runs/mxa && python3 scripts/maxwell_eval.py runs/mxa          # magnetostatics: currents x 1.5, held-out family, meshes, rotations
+cp -r results/airfrans_pressure/rhmp_s42 runs/afp && python3 scripts/airfrans_pressure_eval.py runs/afp     # AirfRANS: 0.55K / 6.9K-node meshes, rotations, wall, lift
+```
+
+Each script scores the stored `test100` first and then the transfer sets (the last two write their JSON next to the
+run directory, hence the copy); the NS, torus and gauge-field scripts also evaluate the model with the per-mesh
+normalisers frozen at the training mesh (`frozen_units`) and with the per-column rule `frozen_descriptors='auto'`
+(`docs/MATH.md`, section 4b).  Symmetry tables of any run: `scripts/eval_robustness.py`.
+
+## Results
+
+Generated from `results/` by `python3 scripts/collect_results.py results --paper-tables`; the complete tables
+(including R2, parameter counts, the cross-seed means and standard deviations of seeds 42, 1, 2 and an index of all
+253 runs) are in [results/RESULTS.md](results/RESULTS.md).  Table 2 of the paper (six fixed-mesh tasks, seed 42,
+first 100 test samples; MPSN, SCCNN and Clifford-SMPN scored in edge space):
+
+**SSIM** (higher is better)
+
+| model | NS vorticity | torus transport | ellipsoid flow | magnetostatics | Wilson loop | Yang-Mills |
+|---|---:|---:|---:|---:|---:|---:|
+| GCN | 0.6169 | 0.7775 | 0.2100 | 0.3560 | 0.7971 | 0.4407 |
+| GAT | 0.5908 | 0.8627 | 0.2091 | 0.3924 | 0.9080 | 0.4720 |
+| SchNet | 0.6245 | 0.7934 | 0.2090 | 0.3485 | 0.9784 | 0.5039 |
+| EGNN | 0.6160 | 0.7797 | 0.2093 | 0.4089 | 0.9564 | 0.4321 |
+| MPSN | 0.6167 | 0.7664 | 0.1523 | 0.4353 | 0.7896 | 0.5183 |
+| SCCNN | 0.6102 | 0.7627 | 0.1562 | 0.4706 | 0.8558 | 0.5191 |
+| GaugeEquivCNN | 0.9440 | 0.9396 | 0.9684 | 0.6060 | 0.9947 | 0.8262 |
+| GEM-CNN | 0.9659 | 0.9605 | 0.9716 | 0.6100 | 0.9982 | 0.8680 |
+| CW Net | 0.9212 | 0.9323 | 0.4827 | 0.5483 | 0.9745 | 0.6843 |
+| Clifford-SMPN | 0.7371 | 0.8930 | 0.1669 | 0.4464 | 0.9090 | 0.5136 |
+| DeepONet | 0.6248 | 0.2886 | 0.2422 | 0.3479 | 0.8417 | 0.4055 |
+| FNO | 0.8717 | - | - | - | - | - |
+| RHMP | **0.9944** | **0.9900** | **0.999998** | **0.9787** | **0.999940** | **0.999992** |
+
+**Pearson** (higher is better)
+
+| model | NS vorticity | torus transport | ellipsoid flow | magnetostatics | Wilson loop | Yang-Mills |
+|---|---:|---:|---:|---:|---:|---:|
+| GCN | 0.1591 | 0.7848 | 0.0196 | 0.1353 | 0.1112 | 0.1855 |
+| GAT | 0.0949 | 0.8977 | 0.0334 | 0.2325 | 0.5708 | 0.2623 |
+| SchNet | 0.0818 | 0.7842 | 0.0450 | 0.0468 | 0.8621 | 0.3281 |
+| EGNN | 0.0920 | 0.7889 | 0.0459 | 0.2662 | 0.7647 | 0.1608 |
+| MPSN | 0.1339 | 0.7865 | 0.0457 | 0.3113 | 0.2709 | 0.3371 |
+| SCCNN | 0.0281 | 0.7850 | 0.0748 | 0.3723 | 0.4445 | 0.3385 |
+| GaugeEquivCNN | 0.9003 | 0.9588 | 0.9741 | 0.5994 | 0.9485 | 0.7775 |
+| GEM-CNN | 0.9409 | 0.9720 | 0.9740 | 0.6008 | 0.9756 | 0.8295 |
+| CW Net | 0.8802 | 0.9341 | 0.5032 | 0.5098 | 0.8428 | 0.5965 |
+| Clifford-SMPN | 0.5476 | 0.8942 | 0.0915 | 0.2880 | 0.6401 | 0.3581 |
+| DeepONet | 0.2262 | 0.1309 | 0.1893 | 0.1217 | 0.2858 | 0.0284 |
+| FNO | 0.8828 | - | - | - | - | - |
+| RHMP | **0.9911** | **0.9909** | **0.999997** | **0.9893** | **0.999912** | **0.999990** |
+
+**NRMSE** (lower is better)
+
+| model | NS vorticity | torus transport | ellipsoid flow | magnetostatics | Wilson loop | Yang-Mills |
+|---|---:|---:|---:|---:|---:|---:|
+| GCN | 0.0350 | 0.0360 | 0.0613 | 0.0640 | 0.0149 | 0.0355 |
+| GAT | 0.0356 | 0.0260 | 0.0614 | 0.0629 | 0.0102 | 0.0348 |
+| SchNet | 0.0349 | 0.0360 | 0.0614 | 0.0642 | 0.0054 | 0.0340 |
+| EGNN | 0.0350 | 0.0358 | 0.0614 | 0.0624 | 0.0072 | 0.0356 |
+| MPSN | 0.0336 | 0.0362 | 0.0698 | 0.0579 | 0.0159 | 0.0331 |
+| SCCNN | 0.0336 | 0.0361 | 0.0697 | 0.0559 | 0.0135 | 0.0330 |
+| GaugeEquivCNN | 0.0126 | 0.0161 | 0.0141 | 0.0519 | 0.0027 | 0.0227 |
+| GEM-CNN | 0.0096 | 0.0133 | 0.0139 | 0.0519 | 0.0016 | 0.0202 |
+| CW Net | 0.0140 | 0.0207 | 0.0532 | 0.0561 | 0.0056 | 0.0290 |
+| Clifford-SMPN | 0.0271 | 0.0258 | 0.0696 | 0.0576 | 0.0107 | 0.0331 |
+| DeepONet | 0.0349 | 0.0628 | 0.0602 | 0.0642 | 0.0138 | 0.0362 |
+| FNO | 0.0227 | - | - | - | - | - |
+| RHMP | **0.0054** | **0.0076** | **1.45e-04** | **0.0150** | **8.93e-05** | **1.67e-04** |
+
+Table 3 of the paper (AirfRANS pressure, seed 42, 100 test simulations; metrics at the 1.9K-node training size, R2
+without retraining on the 0.55K- and 6.9K-node meshes of the same simulations):
+
+| model | params | SSIM | Pearson | NRMSE | R2 | R2 (0.55K) | R2 (6.9K) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| GCN | 90K | 0.6891 | 0.1642 | 0.0227 | 0.0282 | 0.0268 | 0.0238 |
+| GAT | 92K | 0.6174 | 0.1705 | 0.0233 | -0.0231 | -0.0401 | -0.0107 |
+| SchNet | 96K | 0.6730 | 0.2327 | 0.0228 | 0.0229 | 0.0115 | 0.0204 |
+| EGNN | 100K | 0.6975 | 0.2517 | 0.0226 | 0.0360 | 0.0170 | -0.0010 |
+| MPSN | 96K | 0.6756 | 0.1492 | 0.0229 | 0.0152 | 0.0166 | 0.0130 |
+| SCCNN | 94K | 0.6893 | 0.1652 | 0.0227 | 0.0297 | 0.0284 | 0.0266 |
+| GaugeEquivCNN | 91K | 0.9213 | 0.8570 | 0.0098 | 0.8199 | 0.7568 | 0.6877 |
+| GEM-CNN | 93K | 0.9468 | 0.9030 | 0.0077 | 0.8897 | 0.7277 | 0.6774 |
+| CW Net | 99K | 0.6934 | 0.2195 | 0.0226 | 0.0407 | 0.0231 | -0.0148 |
+| Clifford-SMPN | 96K | 0.6838 | 0.1822 | 0.0228 | 0.0265 | 0.0164 | 0.0201 |
+| RHMP | 89K | **0.9983** | **0.9967** | **0.0016** | **0.9950** | **0.9688** | **0.9817** |
 
 ## Quickstart
 
@@ -114,7 +233,7 @@ from rhmp import CochainComplex, RHMP, RHMPConfig
 
 pts = np.random.default_rng(0).random((200, 2))                      # any triangle mesh (numpy or torch)
 K = CochainComplex.from_triangles(pts, Delaunay(pts).simplices)      # exact d_k, reference stars, geometry
-print(K, "max |d1 d0| =", K.check_d2())
+print(K)                                                             # cells per degree, star, device
 
 cfg = RHMPConfig(in_dims={0: 1, 1: 1}, even_dims={1: 1},             # a vertex field + an even edge coefficient
                  C=32, n_layers=3, readout="node_scalar", out_dim=1)
@@ -130,154 +249,48 @@ opt.zero_grad(); loss.backward(); opt.step()
 print(tuple(y.shape), f"loss {loss.item():.3f}", f"{model.num_parameters()} parameters")
 ```
 
-Inputs and outputs are dictionaries keyed by *degree*: 0 for vertex values, 1 for edge values (such as a flux
-through each edge or a gauge connection), 2 for face values, 3 for cell values.  A physics-solver model (the model
-behind results 1 and 4) is configured in one line:
-`RHMPConfig.solver_preset(in_dims={0: 1, 1: 1, 2: 1}, even_dims={1: 1, 2: 1}, material_dims={1: 1, 2: 1},
-metric_type="tensor", solve_precond="twolevel")`.  Next steps: [docs/TUTORIAL.md](docs/TUTORIAL.md) and the runnable
-[examples/](examples) (each runs on a CPU in under two minutes):
-
-| example | shows |
-|---|---|
-| `01_build_complex.py` | building a mesh calculus from triangles, polygons, tetrahedra or grids; checking it; batching meshes |
-| `02_dec_toolkit.py` | discrete Laplacians, Betti numbers, Hodge decomposition, a batched conjugate-gradient solver, metrics from material tensors |
-| `03_train_poisson.py` | training on heterogeneous diffusion problems on random meshes, with checkpoints |
-| `04_custom_task.py` | wrapping your own data as a task, the library trainer, a gauge connection as input and a face flux as output |
-| `05_variable_meshes.py` | training with a different mesh in every sample |
-| `06_metric_inspection.py` | reading the learned metric out of a model and drawing the material tensors as ellipses |
-
-## How it works, briefly
-
-* **Topology from the mesh.**  Oriented incidence matrices give the discrete gradient (vertices to edges), curl
-  (edges to faces) and divergence; their compositions vanish exactly.
-* **A learned metric.**  Each cell gets a positive weight (diagonal metric) or a positive-definite tensor (tensor
-  metric).  It starts from the geometric weights of discrete exterior calculus, is multiplied by any known material,
-  and is corrected by a small network that sees only local, rotation- and scale-invariant geometry (and any material
-  inputs).  In formula form, `H = star * exp(known material) * exp(a * tanh(MLP(local invariants)))`.
-* **Operators from both.**  Every propagation step applies a metric-weighted Laplacian or transfer operator built
-  from the incidence matrices and the metric, normalised per sample so that its norm is at most 1.  Besides
-  polynomial (local) steps, a *resolvent layer* and a *solve layer* apply the inverse of such an operator with a
-  batched conjugate-gradient solver, which turns the metric into a learned Green's function.
-* **Symmetries by construction.**  Channel mixing is orthogonal-equivariant, geometry enters only through invariants,
-  and gauge connections are handled by an exactly gauge-invariant mode.
-
-The mathematics as implemented, with the test of every guarantee, is in [docs/MATH.md](docs/MATH.md); what the
-metric family can and cannot represent, and what data can identify, is in [docs/THEORY.md](docs/THEORY.md).
-
-## Command line
-
-```bash
-python -m rhmp.train --task HP_k100 --check-data                          # load a task and print its summary
-python -m rhmp.train --task T6f --native --epochs 100 --out runs/t6f      # the gauge-field task of result 2
-python -m rhmp.train --task HP_k100 --native --solver-mode --solve-precond twolevel --solve-iters 128 \
-    --material 1:1,2:1 --metric-type tensor --log-range 3 --epochs 30 --out runs/hp_solver   # physics-solver model, tensor metric
-python -m rhmp.train --task AHP_r100 --native --solver-mode --solve-precond twolevel --solve-iters 128 \
-    --metric-type tensor --log-range 5 --lr 3e-4 --epochs 60 --out runs/ahp_tensor      # anisotropic diffusion (result 1)
-python -m rhmp.train --task T6f --model mgn --epochs 100                  # MeshGraphNet with the same data and protocol
-python -m rhmp.train --task HP_k1000 --eval-ckpt runs/hp_solver --out runs/hp_on_k1000  # evaluate a trained model on another task
-python3 scripts/eval_robustness.py runs/t6f --all                         # symmetry and robustness table of a run
-python3 scripts/metric_recovery.py runs/hp_solver                         # learned metric versus true material
-```
-
-Every option of `RHMPConfig` has a flag (`--layers poly,resolvent,poly`, `--metric-ref 1:0`, `--latent 1:8`,
-`--aux-pde 1.0`, ...).  The full `--help`, the list of tasks and the list of models (structural controls and the baselines
-MeshGraphNet, GCN, GAT, SchNet, EGNN, GaugeEquivCNN, GEM-CNN, MPSN, SCCNN, CW Net, Clifford-SMPN, FNO and DeepONet,
-all trained by the same trainer) are documented in [docs/API.md](docs/API.md).  The scripts that produce the reported
-results are in [scripts/](scripts); REPORT.md section 11 lists the command of each table.
-
-### Task names used in the report and the result files
-
-| name | task |
-|---|---|
-| `HP_k10`, `HP_k100`, `HP_k1000` | heterogeneous diffusion on random 2-D meshes; conductivity contrast 10, 100, 1000; each with a 4x-finer test set |
-| `AHP_r10`, `AHP_r100` | anisotropic 2-D diffusion, anisotropy ratio 10 or 100, principal axes not aligned with the mesh |
-| `ASURF_r100` | fibre (anisotropic) diffusion on curved closed surfaces |
-| `ACURL_*`, `ADARCY*` | anisotropic curl-curl problems and 3-D Darcy flow on tetrahedral meshes (`ADARCYp`: the pressure) |
-| `TET_k100` | 3-D heterogeneous diffusion on tetrahedral meshes |
-| `SURF`, `SURF_heat` | diffusion and heat flow on closed surfaces of varying shape, with unseen-geometry and unseen-topology test sets |
-| `DYN`, `DYNfix`, `DYNfix_cons` | advection-diffusion time stepping and long rollouts on varying / one fixed mesh; `_cons`: exactly mass-conserving variant |
-| `HP_qual_*` | the heterogeneous diffusion problems on meshes of degraded quality |
-| `T1` ... `T8` | the tasks of the paper: vorticity (T1), transport on a torus (T2), flow on an ellipsoid (T3), electrostatics (T5), a U(1) gauge field (T6), an SU(2) gauge field (T7), airfoil pressure (T8) |
-| `T6f`, `T7f`, `T5g`, `T1q` | variants of the paper tasks with the target on its natural cochain (face flux), a gradient output layer, or a quadrilateral mesh |
-
-## Model zoo
-
-[results/checkpoints/](results/checkpoints) holds fifteen small trained models (4.0 MB in total), each with its
-training configuration and test result: the 2.4K-parameter physics-solver models of results 1, 2 and 4, the
-gauge-field, surface, time-stepping and vector-field models of the figures, and the general-network and MeshGraphNet
-comparison runs.  Loading one takes a line:
-
-```python
-from rhmp import RHMP
-model = RHMP.from_checkpoint("results/checkpoints/HP_k100_solver_tensor_learn/best.pt", map_location="cpu")
-```
-
-`python -m rhmp.train --task HP_k100 --eval-ckpt results/checkpoints/HP_k100_solver_tensor_learn --out runs/zoo`
-re-evaluates a checkpoint on its task; [results/checkpoints/README.md](results/checkpoints/README.md) lists all
-fifteen, and `results/checkpoints/load_example.py` applies one to a new mesh without any data set.
-
-## Engineering and capabilities
-
-**Performance.**  The sparse operators of a mesh are built once, stored in CSR form with their transposes, and shared
-by every layer; fields use a `(cells, samples, channels)` layout that needs no copies; the small per-layer networks
-run as fused kernels; and different meshes are batched block-diagonally.  On one GPU, a 4-layer, 128-channel model on
-a 1024-vertex mesh trains at 63.4 ms per step of 64 samples (inference 17.6 ms, peak memory 4.27 GB), and a 4-layer,
-16-channel model on a one-million-triangle mesh trains at 131 ms per step (inference 38 ms, 8.06 GB, or 3.84 GB with
-mixed precision and activation checkpointing).  The calculus of a 100K-face mesh is built and verified in 8 ms, that
-of a 1M-face mesh in 16 ms.  Batches of different meshes train 6 to 14 times faster than looping over the meshes.
-The benchmarks and their results are in [bench/](bench).
-
-**Robust numerics.**  The learned metric is bounded above and below, every operator is normalised per sample to norm
-at most 1, and predictions are independent of which samples share a batch.  Meshes are validated on construction
-(degenerate and duplicate cells are reported), outputs stay finite on sliver meshes with aspect ratio 1e4 and on
-extreme inputs, and the trainer supports mixed precision, activation checkpointing, resuming and checkpoint round trips.
-
-**Capabilities.**
-
-* Inputs and outputs on any degree: vertex values, edge fields (fluxes, gauge connections), face fluxes, cell
-  densities; an exactly gauge-invariant mode for connection fields; output layers that are exactly curl-free,
-  divergence-free or mass-conserving.
-* Diagonal and full tensor metrics; a known material can be supplied as a reference and only the correction is
-  learned; resolvent and solve layers (learned Green's functions); the physics-solver model with an
-  operator-identification loss for material recovery.
-* Triangle meshes, polygons and quadrilaterals, curved surfaces, tetrahedral volumes and regular grids, and training
-  with a different mesh in every sample.
-* A discrete-calculus toolkit: Hodge Laplacians, Hodge decomposition, Betti numbers and harmonic bases, a batched
-  conjugate-gradient solver with implicit gradients, and sharp / flat maps between edge fields and vectors.
-* One trainer for the library model and for MeshGraphNet, GCN, GAT, SchNet, EGNN, GaugeEquivCNN, GEM-CNN, MPSN, SCCNN,
-  CW Net, Clifford-SMPN, FNO and DeepONet, with parameter matching, so that every comparison uses the same data, split,
-  loss and protocol.
-* Evaluation scripts for symmetry and robustness tables, transfer to new meshes and resolutions, metric recovery and
-  long rollouts, and a task suite with generators: the paper's tasks, heterogeneous and anisotropic diffusion in 2-D,
-  on surfaces and in 3-D, time stepping, and mesh-quality shifts.
-
-**Orientation-dependent targets.**  Some published targets (vorticity, gauge-field and ellipsoid-flow tasks) flip
-sign under a reflection or under a change of the face-orientation convention.  An exactly invariant model cannot
-output them from the fields themselves, so the library predicts the field on its natural cochain and applies a fixed,
-parameter-free orientation map, which reproduces such targets exactly (to 7e-8).
+A trained model is loaded with `RHMP.from_checkpoint("results/wilson_loop/rhmp_s42/best.pt", map_location="cpu")`
+and applied to any mesh in the same way; `K.check_d2()` returns the (round-off) size of `d_1 d_0`.
+Inputs and outputs are dictionaries keyed by degree (0 vertices, 1 edges, 2 faces, 3 cells).  Layer types are
+`poly` (polynomial filters of the normalised Hodge operators), `resolvent` (a learned Green's function through a
+batched conjugate-gradient solve), `solve` (a physical solve with Dirichlet / Neumann data, optionally with Picard
+iterations for state-dependent metrics) and `project` (a metric Hodge projection of the edge features with a learned
+harmonic correction; solvers `cg`, `direct` = sparse LU, `dense` = batched Cholesky); metrics are diagonal or full
+tensors per cell.  [docs/TUTORIAL.md](docs/TUTORIAL.md) walks through the library, [docs/MATH.md](docs/MATH.md)
+states the mathematics as implemented with the test of every guarantee, [docs/API.md](docs/API.md) (generated by
+`docs/gen_api.py`) documents every public function, and `examples/` holds six runnable CPU examples (complex
+construction, the DEC toolkit, training on heterogeneous diffusion, a custom task, variable meshes, reading out the
+learned metric).
 
 ## Repository layout
 
 | path | contents |
 |---|---|
-| `rhmp/` | the package: mesh calculus, discrete-calculus toolkit, metrics, layers, model, output layers, trainer, tasks, baselines (`rhmp/baselines/v1`: the original implementation, vendored for the baseline comparisons) |
-| `tests/` | the test suite (`python -m pytest tests -q`) |
-| `examples/` | six runnable examples (CPU) |
-| `docs/` | [TUTORIAL](docs/TUTORIAL.md), [MATH](docs/MATH.md), [THEORY](docs/THEORY.md), [API](docs/API.md) (generated by `docs/gen_api.py`), [DESIGN](docs/DESIGN.md), [TASK_SUITE](docs/TASK_SUITE.md), [TASK_SUITE_DETAILS](docs/TASK_SUITE_DETAILS.md), [ANISO_TASKS](docs/ANISO_TASKS.md), [BASELINES](docs/BASELINES.md), [DATASETS](docs/DATASETS.md), [REPORT_zh](docs/REPORT_zh.md) (Chinese report), `figures/` and `figures_zh/` |
-| `scripts/` | experiment drivers, data-set generation (`gen_datasets.sh`), evaluation (robustness, transfer, metric recovery, rollouts), `collect_results.py`, `make_figures.py`, `make_field_figures.py` |
-| `datasets/` | [README](datasets/README.md), the downloader for the paper's data sets and the generators of the new ones (`datasets/generators/`) |
-| `bench/` | operator, training-step and batching benchmarks and their results |
-| `results/` | per-run result files (`results/<group>/<run>/`; see [results/README.md](results/README.md)), `RESULTS.md` and the model zoo (`results/checkpoints/`) |
-| `tools/` | helpers for running experiments on a remote GPU host (sync, run, fetch; `HOST=... tools/remote.sh ...`) |
-| `shims/` | a pyvista unpickling shim for the ellipsoid data set (T3) on machines without pyvista |
+| `rhmp/` | the package: cochain complexes (`complex.py`), geometry, sparse operators, DEC toolkit (`dec.py`), metrics, layers (`layers.py`), transport term, lifting, readouts, the model (`model.py`), the trainer (`train.py`), tasks (`tasks/`: the paper tasks, `torus.py`, `maxwell.py`, `airfrans.py`, the synthetic / extension / anisotropy suites) and baselines (`baselines/`, with the original v1 implementation vendored in `baselines/v1/`) |
+| `tests/` | the test suite |
+| `examples/` | six runnable examples |
+| `docs/` | TUTORIAL, MATH, THEORY, API (generated), DESIGN, TASK_SUITE, TASK_SUITE_DETAILS, ANISO_TASKS, BASELINES, DATASETS |
+| `datasets/` | the downloader of the original pickles, the generators (`generators/`), [README](datasets/README.md) |
+| `scripts/` | `train_paper_models.sh`, `eval_checkpoint.py`, the zero-shot / rotation evaluations (`eval_frozen_units.py`, `eval_torus_aniso.py`, `transfer_eval/`, `frame_eval/`, `maxwell_eval.py`, `airfrans_pressure_eval.py`), the Maxwell and AirfRANS study launchers (`run_maxwell.sh`, `run_pressure.sh`), `collect_results.py`, `sanitize_results.py`, data generation (`gen_datasets.sh`), and the robustness / transfer / metric-recovery tools of the library (`eval_robustness.py`, `eval_on.py`, `metric_recovery.py`, `t6_mesh_transfer.py`, `run_aniso.sh`, `run_baselines.sh`); every script starts with a comment that says what it reproduces |
+| `results/` | the 253 runs of the paper (`<task>/<model>_s<seed>/result.json`, `config.json`; RHMP checkpoints), the evaluation files (`evaluations/`) and [RESULTS.md](results/RESULTS.md) |
+
+## Tests
+
+```bash
+python3 -m pytest tests -q               # CPU; the CUDA tests run when a GPU is visible (about 7 minutes on an idle GPU)
+```
+
+The suite checks the exact structure (`d_{k+1} d_k = 0`, orientation and relabelling invariance, gauge invariance,
+operator norms, batch independence), the numerics of every layer type and solver, the metrics against the original
+evaluation code, checkpoint round trips, the trainer, the task loaders and the baselines.  Tests that need a data
+set are skipped when the file is absent.
 
 ## Citation and licence
-
-Please cite the paper (metadata in [CITATION.cff](CITATION.cff)):
 
 ```
 Zheng and Allen-Blanchette, "Learning Discrete Riemannian Metrics for Physical Fields with Cochain-Frame
 Equivariance", Advances in Neural Information Processing Systems (NeurIPS), 2026 (spotlight).  arXiv:2608.14556.
 ```
 
-Licence: to be decided by the authors; see [LICENSE_NOTE.md](LICENSE_NOTE.md).
+Metadata in [CITATION.cff](CITATION.cff).  Licence: see [LICENSE_NOTE.md](LICENSE_NOTE.md).  The vendored v1 code in
+`rhmp/baselines/v1/` comes from the original repository, https://github.com/ContinuumCoder/Riemannian-Hodge-Message-Passing.

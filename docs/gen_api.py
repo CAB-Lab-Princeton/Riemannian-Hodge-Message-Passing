@@ -39,10 +39,16 @@ MODULES = [
     ("rhmp.metrics", "Metrics", "R2 / MSE / MAE / NRMSE / SSIM / Pearson (v1-compatible)"),
     ("rhmp.train", "Trainer", "training / evaluation loop and CLI"),
     ("rhmp.tasks", "Task registry", "load_task and the paper / synthetic tasks"),
+    ("rhmp.tasks.torus", "Torus transport task", "anisotropic transport on the torus (T2a)"),
+    ("rhmp.tasks.maxwell", "Magnetostatics tasks", "nonlinear (anisotropic) magnetostatics and electrostatics (MXS, MXA, MXE)"),
+    ("rhmp.tasks.airfrans", "AirfRANS tasks", "pressure / velocity tasks on body-fitted meshes (AFP*, AFV*, AFU*, AFD, T8*)"),
+    ("rhmp.tasks.aniso", "Anisotropy task suite", "AHP, ASURF, ACURL, ADARCY loaders and structure metrics"),
     ("rhmp.tasks.suite", "Extension task suite", "SURF, DYN, QUAL loaders and rollouts"),
+    ("rhmp.robustness", "Robustness", "symmetry and robustness transforms of a task"),
     ("rhmp.baselines", "Baselines", "lazy entry points"),
     ("rhmp.baselines.registry", "Baseline registry", "model specs, applicability, parameter matching"),
-    ("rhmp.layers", "Building blocks: layers", "normalised metric Hodge operators, resolvent, RHMPLayer"),
+    ("rhmp.layers", "Building blocks: layers", "normalised metric Hodge operators, resolvent / solve / projection layers, RHMPLayer"),
+    ("rhmp.transport", "Building blocks: transport term", "advective transport fluxes of the vertex features"),
     ("rhmp.metric", "Building blocks: metric heads", "bounded log-metric and material-tensor heads"),
     ("rhmp.lifting", "Building blocks: lifting", "raw inputs on any degree -> hidden cochains"),
     ("rhmp.readout", "Building blocks: readouts", "node / cochain / even / constraint / vector readouts"),
@@ -304,7 +310,7 @@ def render_registries() -> str:
     names = tasks.list_tasks()
     listed = [n for n in SUITE_TASKS if n in names]
     out = ["## Registries (generated from the code)\n\n", "### Tasks: `rhmp.tasks.load_task(name, root, ...)`\n\n",
-           "Datasets are not part of the package: paper tasks read `datasets/*.pkl` (v1 pickles), the other tasks read "
+           "Datasets are not part of the package: paper tasks read `datasets/*.pkl` (the original pickles), the other tasks read "
            "`datasets/v2/*.pt` produced by the generators in `datasets/generators/` (see `docs/DATASETS.md`, "
            "`docs/TASK_SUITE.md`).  HP/TET names accept the suffixes `_k<kappa>` and `_aniso[<R>]` "
            "(module docstring of `rhmp.tasks`).  Every name below is accepted by `load_task` and by "
@@ -316,6 +322,12 @@ def render_registries() -> str:
             return "extension suite (`rhmp.tasks.suite`)"
         if n.startswith(("HP", "TET")):
             return "synthetic (`rhmp.tasks.synthetic`)"
+        if n.startswith(("MXS", "MXA", "MXE")):
+            return "magnetostatics (`rhmp.tasks.maxwell`)"
+        if n.startswith(("AF", "T8") ) and n not in ("T8", "T8v"):
+            return "AirfRANS (`rhmp.tasks.airfrans`)"
+        if n.startswith("T2a"):
+            return "torus (`rhmp.tasks.torus`)"
         return "paper (`rhmp.tasks.paper`)"
     for name in names:
         d = tasks.task_defaults(name)

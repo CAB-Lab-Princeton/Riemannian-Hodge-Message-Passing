@@ -202,7 +202,7 @@ as `geo_*` / `topo_*` next to `test_*` and the per-family in-distribution subset
     on the mass change y = M du (readout `div:1`), and rollouts use u ← u + y/M.
     * The lumped mass varies about 900:1 on the DYN meshes (Delaunay of uniform random points; M_min/M_median =
       0.008). Errors in y come out roughly uniform in absolute size, so they become ~1/M_i errors in du.
-    * The trained `DYN_cons_s42` run (`results/extension_suite/DYN_cons_s42`; 100 epochs, one-step R² 0.954 on y) has one-step errors of up to 6.8 in
+    * A trained `DYN_cons` model (100 epochs, one-step R² 0.954 on y) has one-step errors of up to 6.8 in
       du at the smallest cells, against a typical |du| of 0.01. Its rollouts diverge: R2@5 = −7e24, NaN from step 7.
       The largest errors sit exactly at the M/median = 0.008–0.03 nodes and grow about 700× per step.
     * Conservation itself holds exactly: the predicted y sums to 4e-10 per mesh.
@@ -296,7 +296,7 @@ per-mesh maximum aspect is ~1.4e3 (median over instances).
   * `HP_qual_sliver_ref`: a8 0.541.
   * `HP_qual_graded` circle levels: 0.72–0.73 (relL2M 0.54 → 0.61).
 
-  Results are in `results/mesh_quality/eval_*.json`. Evaluation takes about 1 min per set on a GPU shared with other jobs.
+  Evaluation takes about 1 min per set on a GPU shared with other jobs.
 
 ---
 
@@ -318,8 +318,7 @@ field.
 ---
 
 ## Short runs (v2 defaults C=128, L=4, 2 epochs, seed 42; on a GPU shared with ~10 other processes)
-These runs validate the pipeline; their times are inflated because the GPU is shared.  The 100-epoch results are in
-[../REPORT.md](../REPORT.md) §6.2 and §6.7.
+These runs validate the pipeline; their times are inflated because the GPU is shared.
 
 | task | val R² ep1 / ep2 | test R² | extra tests (R²) | s/epoch | peak GB |
 |---|---|---|---|---|---|
