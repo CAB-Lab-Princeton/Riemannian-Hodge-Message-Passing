@@ -1,0 +1,794 @@
+{
+ "env": {
+  "device": "cuda",
+  "tf32": true,
+  "threads": 8,
+  "torch": "2.10.0+cu128",
+  "tag": "proj",
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "gauge_mult": [
+   0.1,
+   1.0,
+   10.0
+  ],
+  "gauge_seed": 0
+ },
+ "task": "T7",
+ "condition_checks": {
+  "orig_regen": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 5.960464477539063e-08,
+   "max_abs_face_cochain": 1.3792716264724731,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 5.960464477539063e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3050,
+    2027
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "new": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 5.960464477539063e-08,
+   "max_abs_face_cochain": 0.7359726428985596,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 2.9802322387695312e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3052,
+    2029
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "aniso": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 1.1920928955078125e-07,
+   "max_abs_face_cochain": 0.8081214427947998,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 2.9802322387695312e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3052,
+    2029
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "fine": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 5.960464477539063e-08,
+   "max_abs_face_cochain": 1.0368387699127197,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 2.9802322387695312e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    4096,
+    12265,
+    8170
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "new_s1": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 5.960464477539063e-08,
+   "max_abs_face_cochain": 0.7514437437057495,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 5.960464477539063e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3048,
+    2025
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "aniso_s1": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 5.960464477539063e-08,
+   "max_abs_face_cochain": 0.7218736410140991,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 2.9802322387695312e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3048,
+    2025
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "new_s2": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 1.1920928955078125e-07,
+   "max_abs_face_cochain": 0.9073982238769531,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 5.960464477539063e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3046,
+    2023
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "aniso_s2": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 1.1920928955078125e-07,
+   "max_abs_face_cochain": 1.0071314573287964,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 2.9802322387695312e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3046,
+    2023
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "new_s3": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 5.960464477539063e-08,
+   "max_abs_face_cochain": 1.0412890911102295,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 2.9802322387695312e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3053,
+    2030
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "aniso_s3": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 1.1920928955078125e-07,
+   "max_abs_face_cochain": 0.7474402785301208,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 5.960464477539063e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3053,
+    2030
+   ],
+   "faces_dropped_by_complex": 0
+  },
+  "graded": {
+   "max_abs_d1_edge_cochain_minus_face_cochain": 5.960464477539063e-08,
+   "max_abs_face_cochain": 0.8156898021697998,
+   "max_abs_oriented_face_to_node_of_face_cochain_minus_target": 5.960464477539063e-08,
+   "edge_order_identical_to_canonical": true,
+   "face_order_identical_to_input": true,
+   "n_cells": [
+    1024,
+    3054,
+    2031
+   ],
+   "faces_dropped_by_complex": 0
+  }
+ },
+ "conditions": [
+  "orig",
+  "orig_regen",
+  "new",
+  "aniso",
+  "fine",
+  "new_s1",
+  "aniso_s1",
+  "new_s2",
+  "aniso_s2",
+  "new_s3",
+  "aniso_s3",
+  "graded"
+ ],
+ "runs": {
+  "rhmp": {
+   "task": "T7",
+   "model": "rhmp",
+   "params": 105808,
+   "train_gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+   "stats_rel_diff_loaded_vs_saved": 0.0,
+   "target_protocol": null,
+   "eval_batch": 64,
+   "stored_test100": {
+    "R2": 0.9999784034939961,
+    "SSIM": 0.9999919417913813,
+    "Pearson": 0.9999895216032557,
+    "NRMSE": 0.0001672479067235931,
+    "MSE": 2.1466675364029272e-05,
+    "MAE": 0.002616514490987825,
+    "R2_v1": 0.9999784034935129,
+    "N": 100
+   },
+   "conditions": {
+    "orig": {
+     "R2": 0.9999784034939961,
+     "SSIM": 0.9999919417913816,
+     "Pearson": 0.9999895216032559,
+     "NRMSE": 0.0001672479067235931,
+     "MSE": 2.1466675364029272e-05,
+     "MAE": 0.002616514490987825,
+     "R2_v1": 0.9999784034935129,
+     "N": 100,
+     "finite": true
+    },
+    "orig_regen": {
+     "R2": 0.9999784034935559,
+     "SSIM": 0.9999919417917975,
+     "Pearson": 0.999989521602857,
+     "NRMSE": 0.00016724789657593655,
+     "MSE": 2.1466675797322963e-05,
+     "MAE": 0.0026165146182333316,
+     "R2_v1": 0.9999784034937873,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 13.860906600952148,
+     "seconds": 0.0848379135131836
+    },
+    "new": {
+     "R2": 0.9996267682625499,
+     "SSIM": 0.9998411539830727,
+     "Pearson": 0.9998276958143439,
+     "NRMSE": 0.0010073780554087264,
+     "MSE": 0.000360892101116923,
+     "MAE": 0.0032356102482949305,
+     "R2_v1": 0.9996267682205816,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 12.221632957458496,
+     "seconds": 0.08509087562561035
+    },
+    "aniso": {
+     "R2": 0.9998431330181731,
+     "SSIM": 0.999946339130662,
+     "Pearson": 0.9999269003367119,
+     "NRMSE": 0.00040352378351238223,
+     "MSE": 0.00015540446220792375,
+     "MAE": 0.003366577253245671,
+     "R2_v1": 0.9998431330035558,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 22.005889892578125,
+     "seconds": 0.08507585525512695
+    },
+    "fine": {
+     "R2": 0.9999842314392374,
+     "SSIM": 0.999992863238303,
+     "Pearson": 0.9999922252795778,
+     "NRMSE": 0.00024390685411217322,
+     "MSE": 1.3690766559775962e-05,
+     "MAE": 0.002361498233859236,
+     "R2_v1": 0.9999842314394195,
+     "N": 100,
+     "eval_batch_used": 8,
+     "finite": true,
+     "max_abs_pred_normalised": 7.976102828979492,
+     "seconds": 2.2159390449523926
+    },
+    "new_s1": {
+     "R2": 0.9999377179232167,
+     "SSIM": 0.9999730268049382,
+     "Pearson": 0.9999700372794947,
+     "NRMSE": 0.0003849005809456764,
+     "MSE": 5.9865663993419726e-05,
+     "MAE": 0.0037674058998662875,
+     "R2_v1": 0.9999377179274185,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 12.080379486083984,
+     "seconds": 0.08509612083435059
+    },
+    "aniso_s1": {
+     "R2": 0.9999637594243622,
+     "SSIM": 0.9999839274851101,
+     "Pearson": 0.9999822669305607,
+     "NRMSE": 0.0003002930674718432,
+     "MSE": 3.5866393166072966e-05,
+     "MAE": 0.0033186280410710577,
+     "R2_v1": 0.9999637594290246,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 10.310464859008789,
+     "seconds": 0.08535051345825195
+    },
+    "new_s2": {
+     "R2": 0.9999507072216569,
+     "SSIM": 0.9999791302826847,
+     "Pearson": 0.9999759786734651,
+     "NRMSE": 0.0003159392051000353,
+     "MSE": 4.7812329550986695e-05,
+     "MAE": 0.0028419723364187218,
+     "R2_v1": 0.9999507072178702,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 12.244744300842285,
+     "seconds": 0.08474016189575195
+    },
+    "aniso_s2": {
+     "R2": 0.9999398865625939,
+     "SSIM": 0.9999784859438137,
+     "Pearson": 0.9999705603410897,
+     "NRMSE": 0.0002532412403964972,
+     "MSE": 5.952793194738531e-05,
+     "MAE": 0.003170907980166916,
+     "R2_v1": 0.99993988656162,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 19.07033920288086,
+     "seconds": 0.08501935005187988
+    },
+    "new_s3": {
+     "R2": 0.9998929589614897,
+     "SSIM": 0.9999540664948217,
+     "Pearson": 0.999948745556804,
+     "NRMSE": 0.0005189554641925731,
+     "MSE": 0.00010377053303821408,
+     "MAE": 0.0028944688905146103,
+     "R2_v1": 0.9998929589679464,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 11.049432754516602,
+     "seconds": 0.08513498306274414
+    },
+    "aniso_s3": {
+     "R2": 0.9998983788531282,
+     "SSIM": 0.9999605002337589,
+     "Pearson": 0.9999524785609846,
+     "NRMSE": 0.0004043585005284732,
+     "MSE": 0.0001020464491834088,
+     "MAE": 0.0031681102697675868,
+     "R2_v1": 0.9998983788589203,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 14.86288833618164,
+     "seconds": 0.08502435684204102
+    },
+    "graded": {
+     "R2": 0.999932757356664,
+     "SSIM": 0.9999701495920258,
+     "Pearson": 0.9999672353095264,
+     "NRMSE": 0.0004080802797991713,
+     "MSE": 6.519070988678956e-05,
+     "MAE": 0.0028428325672045208,
+     "R2_v1": 0.9999327573592446,
+     "N": 100,
+     "eval_batch_used": 64,
+     "finite": true,
+     "max_abs_pred_normalised": 11.020544052124023,
+     "seconds": 0.08561825752258301
+    }
+   },
+   "recomputed_test100": {
+    "R2": 0.9999784034939961,
+    "SSIM": 0.9999919417913816,
+    "Pearson": 0.999989521603256,
+    "NRMSE": 0.0001672479067235931,
+    "MSE": 2.1466675364029272e-05,
+    "MAE": 0.002616514490987825,
+    "R2_v1": 0.9999784034935129,
+    "N": 100
+   },
+   "reproduction_abs_diff": {
+    "R2": 0.0,
+    "SSIM": 3.3306690738754696e-16,
+    "Pearson": 3.3306690738754696e-16,
+    "NRMSE": 0.0
+   },
+   "reproduction_max_abs_diff": 3.3306690738754696e-16,
+   "repeat_abs_diff": 0.0,
+   "seconds": 3.4144372940063477,
+   "frozen_units": {
+    "task": "T7",
+    "model": "rhmp",
+    "params": 105808,
+    "train_gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+    "stats_rel_diff_loaded_vs_saved": 0.0,
+    "target_protocol": null,
+    "eval_batch": 64,
+    "stored_test100": {
+     "R2": 0.9999784034939961,
+     "SSIM": 0.9999919417913813,
+     "Pearson": 0.9999895216032557,
+     "NRMSE": 0.0001672479067235931,
+     "MSE": 2.1466675364029272e-05,
+     "MAE": 0.002616514490987825,
+     "R2_v1": 0.9999784034935129,
+     "N": 100
+    },
+    "conditions": {
+     "orig": {
+      "R2": 0.9999784034939961,
+      "SSIM": 0.9999919417913816,
+      "Pearson": 0.9999895216032559,
+      "NRMSE": 0.0001672479067235931,
+      "MSE": 2.1466675364029272e-05,
+      "MAE": 0.002616514490987825,
+      "R2_v1": 0.9999784034935129,
+      "N": 100,
+      "finite": true
+     },
+     "orig_regen": {
+      "R2": 0.9999784034935559,
+      "SSIM": 0.9999919417917974,
+      "Pearson": 0.9999895216028567,
+      "NRMSE": 0.00016724789657593655,
+      "MSE": 2.1466675797322963e-05,
+      "MAE": 0.0026165146182333316,
+      "R2_v1": 0.9999784034937873,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 13.860906600952148,
+      "seconds": 0.0854043960571289
+     },
+     "new": {
+      "R2": 0.996749565295694,
+      "SSIM": 0.9985783711328364,
+      "Pearson": 0.9984493068292707,
+      "NRMSE": 0.0029728585456906655,
+      "MSE": 0.0031429701503811525,
+      "MAE": 0.004699903341601009,
+      "R2_v1": 0.9967495653978662,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 9.02511978149414,
+      "seconds": 0.08576369285583496
+     },
+     "aniso": {
+      "R2": 0.996545617097856,
+      "SSIM": 0.9988026791186337,
+      "Pearson": 0.9983742646740207,
+      "NRMSE": 0.0018936236724917846,
+      "MSE": 0.0034221766168755284,
+      "MAE": 0.005247622974730792,
+      "R2_v1": 0.9965456171765331,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 12.48211669921875,
+      "seconds": 0.08568739891052246
+     },
+     "fine": {
+      "R2": 0.3569246694521936,
+      "SSIM": 0.9743599505116987,
+      "Pearson": 0.9725908091984381,
+      "NRMSE": 0.049255611258799806,
+      "MSE": 0.5583384789159437,
+      "MAE": 0.018117380981862476,
+      "R2_v1": 0.35692466537380785,
+      "N": 100,
+      "eval_batch_used": 8,
+      "finite": true,
+      "max_abs_pred_normalised": 214.4034423828125,
+      "seconds": 2.2114484310150146
+     },
+     "new_s1": {
+      "R2": 0.9999795806564068,
+      "SSIM": 0.9999910476914735,
+      "Pearson": 0.9999899758528352,
+      "NRMSE": 0.00022038899060363747,
+      "MSE": 1.9627116269245015e-05,
+      "MAE": 0.0032194158765032,
+      "R2_v1": 0.999979580656755,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 12.20329761505127,
+      "seconds": 0.0858316421508789
+     },
+     "aniso_s1": {
+      "R2": 0.9999763971114047,
+      "SSIM": 0.999989471991598,
+      "Pearson": 0.9999884992812499,
+      "NRMSE": 0.00024234310048932444,
+      "MSE": 2.3359189729062323e-05,
+      "MAE": 0.0032534887820963167,
+      "R2_v1": 0.999976397110791,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 10.35776424407959,
+      "seconds": 0.08568930625915527
+     },
+     "new_s2": {
+      "R2": 0.998650997008029,
+      "SSIM": 0.9994404574087006,
+      "Pearson": 0.9993469888215125,
+      "NRMSE": 0.0016527974319340635,
+      "MSE": 0.0013084873238115168,
+      "MAE": 0.004563304477973366,
+      "R2_v1": 0.9986509970146935,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 12.268138885498047,
+      "seconds": 0.08564019203186035
+     },
+     "aniso_s2": {
+      "R2": 0.9950913495718178,
+      "SSIM": 0.9982525234264685,
+      "Pearson": 0.9975708635183733,
+      "NRMSE": 0.0022883761398297155,
+      "MSE": 0.004860840125788413,
+      "MAE": 0.007268399492457661,
+      "R2_v1": 0.9950913495867385,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 19.07988739013672,
+      "seconds": 0.08557629585266113
+     },
+     "new_s3": {
+      "R2": 0.9933441818222564,
+      "SSIM": 0.9971535656955474,
+      "Pearson": 0.9967849667524596,
+      "NRMSE": 0.004092246185151103,
+      "MSE": 0.006452457951847011,
+      "MAE": 0.005989899576105033,
+      "R2_v1": 0.993344181809482,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 11.177700996398926,
+      "seconds": 0.08584761619567871
+     },
+     "aniso_s3": {
+      "R2": 0.9952103325447432,
+      "SSIM": 0.9981071153384687,
+      "Pearson": 0.9976684717187684,
+      "NRMSE": 0.0027760506830739533,
+      "MSE": 0.004809713053077362,
+      "MAE": 0.005768141588534004,
+      "R2_v1": 0.995210332545197,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 13.870861053466797,
+      "seconds": 0.08591008186340332
+     },
+     "graded": {
+      "R2": 0.9999363985411774,
+      "SSIM": 0.9999720078640837,
+      "Pearson": 0.9999687090354493,
+      "NRMSE": 0.00039687147427898466,
+      "MSE": 6.166063742850785e-05,
+      "MAE": 0.002875139190388386,
+      "R2_v1": 0.9999363985409375,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 11.021112442016602,
+      "seconds": 0.08649230003356934
+     }
+    },
+    "recomputed_test100": {
+     "R2": 0.9999784034939961,
+     "SSIM": 0.9999919417913817,
+     "Pearson": 0.999989521603256,
+     "NRMSE": 0.0001672479067235931,
+     "MSE": 2.1466675364029272e-05,
+     "MAE": 0.002616514490987825,
+     "R2_v1": 0.9999784034935129,
+     "N": 100
+    },
+    "reproduction_abs_diff": {
+     "R2": 0.0,
+     "SSIM": 4.440892098500626e-16,
+     "Pearson": 3.3306690738754696e-16,
+     "NRMSE": 0.0
+    },
+    "reproduction_max_abs_diff": 4.440892098500626e-16,
+    "repeat_abs_diff": 1.1102230246251565e-16,
+    "seconds": 3.4174513816833496
+   },
+   "frozen_auto": {
+    "task": "T7",
+    "model": "rhmp",
+    "params": 105808,
+    "train_gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+    "stats_rel_diff_loaded_vs_saved": 0.0,
+    "target_protocol": null,
+    "eval_batch": 64,
+    "stored_test100": {
+     "R2": 0.9999784034939961,
+     "SSIM": 0.9999919417913813,
+     "Pearson": 0.9999895216032557,
+     "NRMSE": 0.0001672479067235931,
+     "MSE": 2.1466675364029272e-05,
+     "MAE": 0.002616514490987825,
+     "R2_v1": 0.9999784034935129,
+     "N": 100
+    },
+    "conditions": {
+     "orig": {
+      "R2": 0.9999784034939961,
+      "SSIM": 0.9999919417913813,
+      "Pearson": 0.9999895216032556,
+      "NRMSE": 0.0001672479067235931,
+      "MSE": 2.1466675364029272e-05,
+      "MAE": 0.002616514490987825,
+      "R2_v1": 0.9999784034935129,
+      "N": 100,
+      "finite": true
+     },
+     "orig_regen": {
+      "R2": 0.9999784034935559,
+      "SSIM": 0.9999919417917977,
+      "Pearson": 0.9999895216028571,
+      "NRMSE": 0.00016724789657593655,
+      "MSE": 2.1466675797322963e-05,
+      "MAE": 0.0026165146182333316,
+      "R2_v1": 0.9999784034937873,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 13.860906600952148,
+      "seconds": 0.0852506160736084
+     },
+     "new": {
+      "R2": 0.996749565295694,
+      "SSIM": 0.9985783711328364,
+      "Pearson": 0.9984493068292706,
+      "NRMSE": 0.0029728585456906655,
+      "MSE": 0.0031429701503811525,
+      "MAE": 0.004699903341601009,
+      "R2_v1": 0.9967495653978662,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 9.02511978149414,
+      "seconds": 0.08604264259338379
+     },
+     "aniso": {
+      "R2": 0.996545617097856,
+      "SSIM": 0.9988026791186337,
+      "Pearson": 0.9983742646740206,
+      "NRMSE": 0.0018936236724917846,
+      "MSE": 0.0034221766168755284,
+      "MAE": 0.005247622974730792,
+      "R2_v1": 0.9965456171765331,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 12.48211669921875,
+      "seconds": 0.08583450317382812
+     },
+     "fine": {
+      "R2": 0.3569246694521936,
+      "SSIM": 0.974359950511699,
+      "Pearson": 0.9725908091984384,
+      "NRMSE": 0.049255611258799806,
+      "MSE": 0.5583384789159437,
+      "MAE": 0.018117380981862476,
+      "R2_v1": 0.35692466537380785,
+      "N": 100,
+      "eval_batch_used": 8,
+      "finite": true,
+      "max_abs_pred_normalised": 214.4034423828125,
+      "seconds": 2.2124581336975098
+     },
+     "new_s1": {
+      "R2": 0.9999795806564068,
+      "SSIM": 0.9999910476914735,
+      "Pearson": 0.9999899758528354,
+      "NRMSE": 0.00022038899060363747,
+      "MSE": 1.9627116269245015e-05,
+      "MAE": 0.0032194158765032,
+      "R2_v1": 0.999979580656755,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 12.20329761505127,
+      "seconds": 0.08587646484375
+     },
+     "aniso_s1": {
+      "R2": 0.9999763971114047,
+      "SSIM": 0.9999894719915982,
+      "Pearson": 0.9999884992812499,
+      "NRMSE": 0.00024234310048932444,
+      "MSE": 2.3359189729062323e-05,
+      "MAE": 0.0032534887820963167,
+      "R2_v1": 0.999976397110791,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 10.35776424407959,
+      "seconds": 0.08582806587219238
+     },
+     "new_s2": {
+      "R2": 0.998650997008029,
+      "SSIM": 0.9994404574087007,
+      "Pearson": 0.9993469888215128,
+      "NRMSE": 0.0016527974319340635,
+      "MSE": 0.0013084873238115168,
+      "MAE": 0.004563304477973366,
+      "R2_v1": 0.9986509970146935,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 12.268138885498047,
+      "seconds": 0.0857534408569336
+     },
+     "aniso_s2": {
+      "R2": 0.9950913495718178,
+      "SSIM": 0.9982525234264685,
+      "Pearson": 0.997570863518373,
+      "NRMSE": 0.0022883761398297155,
+      "MSE": 0.004860840125788413,
+      "MAE": 0.007268399492457661,
+      "R2_v1": 0.9950913495867385,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 19.07988739013672,
+      "seconds": 0.08571910858154297
+     },
+     "new_s3": {
+      "R2": 0.9933441818222564,
+      "SSIM": 0.9971535656955474,
+      "Pearson": 0.9967849667524599,
+      "NRMSE": 0.004092246185151103,
+      "MSE": 0.006452457951847011,
+      "MAE": 0.005989899576105033,
+      "R2_v1": 0.993344181809482,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 11.177700996398926,
+      "seconds": 0.08593082427978516
+     },
+     "aniso_s3": {
+      "R2": 0.9952103325447432,
+      "SSIM": 0.9981071153384687,
+      "Pearson": 0.9976684717187685,
+      "NRMSE": 0.0027760506830739533,
+      "MSE": 0.004809713053077362,
+      "MAE": 0.005768141588534004,
+      "R2_v1": 0.995210332545197,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 13.870861053466797,
+      "seconds": 0.0859689712524414
+     },
+     "graded": {
+      "R2": 0.9999363985411774,
+      "SSIM": 0.9999720078640837,
+      "Pearson": 0.9999687090354498,
+      "NRMSE": 0.00039687147427898466,
+      "MSE": 6.166063742850785e-05,
+      "MAE": 0.002875139190388386,
+      "R2_v1": 0.9999363985409375,
+      "N": 100,
+      "eval_batch_used": 64,
+      "finite": true,
+      "max_abs_pred_normalised": 11.021112442016602,
+      "seconds": 0.08652687072753906
+     }
+    },
+    "recomputed_test100": {
+     "R2": 0.9999784034939961,
+     "SSIM": 0.9999919417913815,
+     "Pearson": 0.9999895216032557,
+     "NRMSE": 0.0001672479067235931,
+     "MSE": 2.1466675364029272e-05,
+     "MAE": 0.002616514490987825,
+     "R2_v1": 0.9999784034935129,
+     "N": 100
+    },
+    "reproduction_abs_diff": {
+     "R2": 0.0,
+     "SSIM": 2.220446049250313e-16,
+     "Pearson": 0.0,
+     "NRMSE": 0.0
+    },
+    "reproduction_max_abs_diff": 2.220446049250313e-16,
+    "repeat_abs_diff": 2.220446049250313e-16,
+    "seconds": 3.419942617416382
+   }
+  }
+ },
+ "seconds": 11.579631090164185
+}

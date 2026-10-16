@@ -1,0 +1,267 @@
+{
+ "args": {
+  "task": "T2a",
+  "native": false,
+  "root": null,
+  "out": "runs/torus/T2a/gcn_s2",
+  "device": null,
+  "epochs": 100,
+  "seed": 2,
+  "model": "gcn",
+  "param_budget": 0.0375,
+  "model_opts": null,
+  "C": null,
+  "layers": null,
+  "metric_type": "diag",
+  "resolvent_iters": null,
+  "resolvent_grad": null,
+  "resolvent_physical": false,
+  "latent": null,
+  "metric_ref": null,
+  "material": null,
+  "solver_mode": false,
+  "solve_iters": null,
+  "solve_precond": null,
+  "solve_bc": null,
+  "tensor_param": null,
+  "aux_pde": 0.0,
+  "no_learn_metric": false,
+  "transport": null,
+  "frozen_units": false,
+  "no_frozen_descriptors": false,
+  "poly": 2,
+  "log_range": 2.0,
+  "metric_hidden": 32,
+  "scaling": "dec",
+  "tie": true,
+  "no_cross": false,
+  "gate": "norm",
+  "identity_metric": false,
+  "star": "cotan",
+  "vector_mode": null,
+  "connection_odd": null,
+  "no_connection": false,
+  "no_output_map": false,
+  "batch": null,
+  "bs_meshes": null,
+  "eval_batch": null,
+  "lr": 0.001,
+  "wd": 1e-05,
+  "eta_min": 1e-05,
+  "clip": 1.0,
+  "amp": false,
+  "compile": false,
+  "compile_backend": "inductor",
+  "ckpt_layers": false,
+  "no_tf32": false,
+  "max_samples": null,
+  "max_train_batches": null,
+  "no_fine": false,
+  "abs_scale": false,
+  "data_on": "auto",
+  "no_resume": false,
+  "force": false,
+  "check_data": false,
+  "eval_v1": null,
+  "eval_ckpt": null,
+  "v1_eval_batch": 1,
+  "quiet": false,
+  "stop_after": null
+ },
+ "model": {
+  "name": "gcn",
+  "hidden": 112,
+  "n_layers": 4,
+  "encoder": [
+   [
+    0,
+    "node",
+    9
+   ]
+  ],
+  "f_in": 9,
+  "head": "NodeHead",
+  "params": 39201,
+  "target_params": 37500,
+  "ratio": 1.04536,
+  "match": {
+   "hidden": 112,
+   "params": 39201,
+   "target": 37500,
+   "ratio": 1.04536,
+   "within_tol": true,
+   "option": {},
+   "cached": true,
+   "matched": true
+  },
+  "rhmp_reference_config": {
+   "in_dims": {
+    "0": 9
+   },
+   "even_dims": {},
+   "connection_dims": {},
+   "C": 64,
+   "n_layers": 4,
+   "poly_order": 2,
+   "metric_hidden": 32,
+   "log_range": 2.0,
+   "tie_metrics": true,
+   "scaling": "dec",
+   "cross": true,
+   "gate": "norm",
+   "identity_metric": false,
+   "readout": "node_scalar",
+   "out_dim": 1,
+   "vector_mode": "ls",
+   "checkpoint_layers": false,
+   "amp": false,
+   "connection_odd": false,
+   "lift_hidden": 64,
+   "fused": true,
+   "layers": null,
+   "resolvent_iters": 20,
+   "resolvent_grad": "implicit",
+   "metric_type": "diag",
+   "metric_reference": {},
+   "resolvent_warm_start": true,
+   "learn_metric": true,
+   "latent_dims": {},
+   "material_dims": {},
+   "lifting": "mlp",
+   "resolvent_normalize": true,
+   "solve_iters": 64,
+   "solve_tol": 1e-06,
+   "solve_bc": "dirichlet",
+   "tensor_param": "full",
+   "solve_precond": "none",
+   "readout_head": "mlp",
+   "transport": {},
+   "frozen_units": false,
+   "frozen_descriptors": true
+  }
+ },
+ "params": 39201,
+ "data": {
+  "name": "T2a",
+  "native": false,
+  "N": 3000,
+  "cells": {
+   "0": 1711,
+   "1": 5133,
+   "2": 3422
+  },
+  "inputs": {
+   "0": [
+    3000,
+    1711,
+    9
+   ]
+  },
+  "target": [
+   3000,
+   1711,
+   1
+  ],
+  "target_degree": 0,
+  "target_kind": "node_scalar",
+  "readout": "node_scalar",
+  "target_readout": "node_scalar",
+  "output_map": null,
+  "in_dims": {
+   "0": 9
+  },
+  "even_dims": {},
+  "connection_dims": {},
+  "split": [
+   2100,
+   450,
+   450
+  ],
+  "spatial_dim": 3,
+  "x_stats": {
+   "0": {
+    "mean": [
+     2.813433513937369e-11,
+     7.945055403979495e-05,
+     -0.0001982954127015546,
+     -0.09016616642475128,
+     0.0005099340341985226,
+     -0.0003001693112310022,
+     -0.0003735217615030706,
+     -3.4751060009002686,
+     -5.745351314544678
+    ],
+    "std": [
+     0.28388357162475586,
+     0.7247012853622437,
+     0.7250255346298218,
+     0.38526013493537903,
+     0.6394830346107483,
+     0.6395459771156311,
+     0.4266640543937683,
+     0.7639359831809998,
+     0.7993849515914917
+    ],
+    "kind": "v1"
+   }
+  },
+  "y_stats": {
+   "mean": [
+    -0.00022645463468506932
+   ],
+   "std": [
+    0.2601902484893799
+   ],
+   "kind": "v1"
+  },
+  "extra_tests": [],
+  "meta": {
+   "v1_C": 64,
+   "batch_size": 64,
+   "layers": 4,
+   "generator": {
+    "T": 0.2,
+    "n_sub": 200,
+    "checks": {
+     "flux": {
+      "div_max_rel": 6.177137948708224e-15,
+      "quadrature_rel_l2": 0.00412089502317918
+     },
+     "isotropic_limit_rel": 3.8753902950763657e-16,
+     "time_convergence": {
+      "25->50": 0.0006039592628642194,
+      "50->100": 0.00015140626098017379,
+      "100->200": 3.7877693776429294e-05,
+      "200->400": 9.471058057686915e-06,
+      "400->800": 2.3678667012376254e-06
+     },
+     "time_error_vs_800_at_N_SUB": 1.1838925197279284e-05,
+     "mesh_convergence_base_vs_fine": {
+      "rel_l2_mean": 0.028874905901375862,
+      "rel_l2_max": 0.06900281974391356,
+      "coincident_vertex_dist_max": 2.5463115409962923e-07
+     }
+    },
+    "mass_drift_max": 9.98769001214598e-15,
+    "target_stats": {
+     "amplitude_ratio_l2_mean": 0.9070291663421209,
+     "rel_change_l2_mean": 0.6389800586416114
+    }
+   },
+   "parameters": {
+    "alpha": "<tensor (3000,)>",
+    "beta": "<tensor (3000,)>",
+    "ratio": "<tensor (3000,)>",
+    "D0": "<tensor (3000,)>",
+    "eps": "<tensor (3000,)>",
+    "chi0": "<tensor (3000,)>"
+   },
+   "metric_ref": "1:3",
+   "material": "1:2,2:2",
+   "legacy_inputs": "node (f, Vx, Vy, Vz, bx, by, bz, log D_par, log D_perp)"
+  }
+ },
+ "load_seconds": 3.5361745357513428,
+ "metric_reference_raw": true,
+ "raw_input_columns": {}
+}
